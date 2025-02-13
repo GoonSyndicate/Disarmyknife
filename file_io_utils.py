@@ -1,8 +1,29 @@
+"""
+File I/O utilities for the File Concatenator application.
+
+This module provides core file operations used by the GUI application:
+- Creating backups of the master file
+- Loading file contents
+- Appending content to the master file
+- Writing directory structure information
+
+All operations include error handling and logging support.
+"""
+
 import os
 import shutil
 from datetime import datetime
 
 def create_backup(master_filename, log):
+    """
+    Create a timestamped backup of the master file.
+    
+    Args:
+        master_filename (str): Path to the master file
+        log (callable): Function to log operations and errors
+        
+    The backup filename includes the current timestamp for uniqueness.
+    """
     if os.path.exists(master_filename):
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         backup_filename = f"{master_filename}.{timestamp}.bak"
@@ -15,6 +36,18 @@ def create_backup(master_filename, log):
         log("No existing master file found; skipping backup.")
 
 def load_file(filename, log):
+    """
+    Read and return the contents of a file.
+    
+    Args:
+        filename (str): Path to the file to read
+        log (callable): Function to log operations and errors
+        
+    Returns:
+        str: File contents if successful, None if an error occurs
+        
+    Uses UTF-8 encoding for file reading.
+    """
     if os.path.exists(filename):
         try:
             with open(filename, 'r', encoding='utf-8') as file:
@@ -27,6 +60,17 @@ def load_file(filename, log):
         return None
 
 def append_to_master(master_filename, filename, content, log):
+    """
+    Append file content to the master file with a header.
+    
+    Args:
+        master_filename (str): Path to the master file
+        filename (str): Path of the source file (for header)
+        content (str): Content to append
+        log (callable): Function to log operations and errors
+        
+    The content is preceded by a header indicating its source file.
+    """
     try:
         with open(master_filename, 'a', encoding='utf-8') as master_file:
             master_file.write(f"\n\n# Content from {filename}\n\n")

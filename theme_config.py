@@ -1,10 +1,44 @@
+"""
+ThemeConfig: Modern theme configuration for the File Concatenator GUI.
+
+This module defines a consistent visual style for the application using ttk styles.
+It creates a custom theme based on 'clam' with modern colors and fonts.
+
+The theme includes:
+- Custom fonts for regular text and headings
+- Modern color scheme with accent colors
+- Styled widgets (buttons, labels, treeview)
+- Status bar styling
+"""
+
 import tkinter as tk
 from tkinter import ttk
 from tkinter.font import Font
 
 class ThemeConfig:
+    """
+    Static configuration class for application theming.
+    
+    Provides a single point of control for the application's visual appearance,
+    ensuring consistency across all widgets and windows.
+    """
+    
     @staticmethod
     def setup_theme():
+        """
+        Configure and apply the application's custom theme.
+        
+        Returns:
+            tuple: (ttk.Style, dict) The configured style object and color scheme
+            
+        The color scheme includes:
+        - bg: Background color
+        - fg: Foreground (text) color
+        - selected: Selection highlight color
+        - hover: Hover state color
+        - accent: Accent color for emphasis
+        - border: Border and separator color
+        """
         style = ttk.Style()
         
         # Configure main theme
