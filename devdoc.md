@@ -206,6 +206,69 @@ The codebase follows literate programming principles to maintain clarity and mai
 
 ---
 
+## New Features
+
+### 1. Search and Filter
+- **Search bar** with real-time filtering of the file explorer
+- Multiple search modes:
+  - Filename search
+  - File extension search
+  - Content search (first 1KB of files)
+- Visual highlighting of matching items
+- Auto-scroll to first match
+
+### 2. Drag and Drop Support
+- Drag files directly from file explorer
+- Drop into selected files list
+- Automatic deduplication
+- Visual feedback during drag operation
+- Support for multiple files
+
+### 3. Enhanced Preview Theming
+- Customizable syntax highlighting themes
+- Real-time theme switching
+- Support for all Pygments styles
+- Preview panel color scheme adaptation
+- Persistent theme selection
+
+## Dependencies
+
+The application requires the following Python packages:
+- tkinter (standard library)
+- tkinterdnd2-universal (`pip install tkinterdnd2-universal`)
+- pygments (`pip install pygments`)
+
+To install all required dependencies:
+```bash
+pip install tkinterdnd2-universal pygments
+```
+
+## Implementation Details
+
+### Search and Filter
+The search functionality uses a reactive approach:
+- Search input is connected to a StringVar for real-time updates
+- Tree items are filtered as you type
+- Search modes can be switched via dropdown
+- Content search is optimized to only read the first 1KB
+
+### Drag and Drop
+Implemented using tkinterdnd2-universal:
+- FileConcatenatorApp inherits from TkinterDnD.Tk
+- Listbox is registered as a drop target
+- Handles multiple file drops
+- Supports cross-platform drag and drop
+- Automatic path normalization and deduplication
+
+### Preview Theming
+Uses Pygments styles:
+- All available Pygments styles are listed
+- Preview updates immediately on style change
+- Background and text colors adapt to theme
+- HTML formatter for rich highlighting
+
+---
+
 ## Conclusion
 
 Disarmyknife’s file concatenation utility is a powerful, modular tool designed to help users efficiently merge multiple files into a single document. With its modern, responsive interface and robust logging and status feedback, the application is well‑suited for both casual and professional use. The code is organized into separate modules for theme configuration, GUI components, file I/O operations, and main execution, ensuring maintainability and scalability for future enhancements.

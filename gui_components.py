@@ -23,8 +23,11 @@ from theme_config import ThemeConfig
 import pygments
 from pygments.lexers import get_lexer_for_filename, TextLexer
 from pygments.formatters import get_formatter_by_name
+import re
+from tkinterdnd2 import DND_FILES, TkinterDnD  # Updated import
+from pygments.styles import get_all_styles, get_style_by_name
 
-class FileConcatenatorApp(tk.Tk):
+class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support drag-drop
     """
     Main application window for the File Concatenator utility.
     
@@ -84,6 +87,16 @@ class FileConcatenatorApp(tk.Tk):
         
         self.progress_bar = ttk.Progressbar(self.status_bar, mode='determinate', length=200)
         self.progress_bar.pack(side="right", padx=5, pady=2)
+
+        # Add search frame above tree
+        self.create_search_widgets()
+        
+        # Add style selector for preview
+        self.create_style_selector()
+        
+        # Configure drag-drop with updated tkinterdnd2
+        self.listbox_files.drop_target_register(DND_FILES)
+        self.listbox_files.dnd_bind('<<Drop>>', self.handle_drop)
 
     def create_explorer_widgets(self):
         """
@@ -462,11 +475,19 @@ class FileConcatenatorApp(tk.Tk):
             except:
                 lexer = TextLexer()
             
-            formatter = get_formatter_by_name('html')
+            style = get_style_by_name(self.style_var.get())
+            formatter = get_formatter_by_name('html',
+                                           style=style,
+                                           full=True)
+            
             highlighted = pygments.highlight(content, lexer, formatter)
             
             self.preview_text.delete('1.0', tk.END)
             self.preview_text.insert('1.0', content)
+            
+            # Apply style colors
+            self.preview_text.configure(bg=style.background_color,
+                                     fg=style.styles['Text'].color or 'black')
             
         except Exception as e:
             self.log(f"Error previewing file: {e}")
@@ -487,3 +508,110 @@ class FileConcatenatorApp(tk.Tk):
     def update_status(self, message):
         self.status_label.config(text=message)
         self.update_idletasks()
+
+    def create_search_widgets(self):
+        """Create search bar and options for file explorer."""
+        search_frame = ttk.Frame(self.frame_explorer)
+        search_frame.pack(fill='x', padx=5, pady=5, before=self.tree_files)
+        
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', self.filter_tree)
+        
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        search_entry.pack(side='left', fill='x', expand=True)
+        
+        self.search_type = tk.StringVar(value="name")
+        type_menu = ttk.OptionMenu(search_frame, self.search_type, 
+                                 "name", "name", "content", "extension",
+                                 command=self.filter_tree)
+        type_menu.pack(side='right', padx=(5,0))
+
+    def filter_tree(self, *args):
+        """Filter treeview items based on search criteria."""
+        search_text = self.search_var.get().lower()
+        search_type = self.search_type.get()
+        
+        # Clear all tags first
+        for item in self.tree_files.get_children():
+            self.clear_tree_tags(item)
+        
+        if not search_text:
+            return
+        
+        # Search and highlight matching items
+        for item in self.tree_files.get_children():
+            self.search_tree_item(item, search_text, search_type)
+
+    def search_tree_item(self, item, search_text, search_type):
+        """Recursively search through tree items."""
+        path = self.tree_item_to_path.get(item)
+        match = False
+        
+        if search_type == "name":
+            match = search_text in os.path.basename(path).lower()
+        elif search_type == "extension":
+            match = search_text in os.path.splitext(path)[1].lower()
+        elif search_type == "content" and os.path.isfile(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read(1024)  # Read first 1KB only
+                    match = search_text in content.lower()
+            except:
+                pass
+        
+        if match:
+            self.tree_files.item(item, tags=('match',))
+            self.tree_files.see(item)
+        
+        for child in self.tree_files.get_children(item):
+            self.search_tree_item(child, search_text, search_type)
+
+    def clear_tree_tags(self, item):
+        """Recursively clear tags from tree items."""
+        self.tree_files.item(item, tags=())
+        for child in self.tree_files.get_children(item):
+            self.clear_tree_tags(child)
+
+    def create_style_selector(self):
+        """Create syntax highlighting style selector."""
+        style_frame = ttk.Frame(self.frame_explorer)
+        style_frame.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(style_frame, text="Preview Theme:").pack(side='left')
+        
+        self.style_var = tk.StringVar(value="default")
+        styles = sorted(list(get_all_styles()))
+        style_combo = ttk.Combobox(style_frame, textvariable=self.style_var,
+                                 values=styles, state='readonly')
+        style_combo.pack(side='left', padx=(5,0))
+        style_combo.bind('<<ComboboxSelected>>', self.update_preview_style)
+
+    def update_preview_style(self, event=None):
+        """Update the preview panel with selected style."""
+        try:
+            selected = self.tree_files.selection()[0]
+            path = self.tree_item_to_path.get(selected)
+            if path and os.path.isfile(path):
+                self.preview_file(path)
+        except IndexError:
+            pass
+
+    def handle_drop(self, event):
+        """Handle drag and drop of files."""
+        # Updated to handle tkinterdnd2 data format
+        if event.data:
+            # Process each file
+            count = 0
+            current_files = self.listbox_files.get(0, tk.END)
+            
+            # Split data into individual files (handles multiple files)
+            files = event.data.split()
+            
+            for file in files:
+                # Clean up file path based on system
+                file = file.strip('{}').replace('\\', '/')
+                if file not in current_files:
+                    self.listbox_files.insert(tk.END, file)
+                    count += 1
+            
+            self.log(f"Added {count} dropped file(s).")
