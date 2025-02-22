@@ -103,6 +103,7 @@ class FileConcatenatorApp(tk.Tk):
         self.tree_files.bind("<Double-1>", self.on_tree_item_double_click)
         self.tree_files.bind("<<TreeviewSelect>>", self.on_tree_selection)
         self.tree_files.bind("<Button-3>", self.show_context_menu)
+        self.tree_files.bind("<<TreeviewOpen>>", self.load_tree_node)
 
         # Add vertical scrollbar for tree
         tree_scroll = ttk.Scrollbar(frame_explorer_inner, orient="vertical", command=self.tree_files.yview)
@@ -276,15 +277,19 @@ class FileConcatenatorApp(tk.Tk):
         messagebox.showinfo("Completed", f"Files have been concatenated into {self.master_filename}.")
 
     def load_directory(self):
-        """Let the user choose a directory to display in the file explorer."""
+        """Load the directory in a separate thread."""
         dir_selected = filedialog.askdirectory(title="Select Directory")
         if not dir_selected:
             return
+
+        # Clear existing data
         self.tree_files.delete(*self.tree_files.get_children())
         self.tree_item_to_path.clear()
         self.tree_item_original_text.clear()
-        self.populate_tree("", dir_selected)
-        self.log(f"Loaded directory: {dir_selected}")
+
+        # Start loading in a separate thread
+        threading.Thread(target=self.populate_tree, args=("", dir_selected), daemon=True).start()
+        self.log(f"Loading directory: {dir_selected}")
 
     def get_indicator(self, path):
         """Return an icon based on file type or folder."""
@@ -305,28 +310,52 @@ class FileConcatenatorApp(tk.Tk):
         return mapping.get(ext, "📄")
 
     def populate_tree(self, parent, path):
-        """Recursively populate the tree with directories and files from the given path."""
-        basename = os.path.basename(path)
-        if not basename:
-            basename = path  # For root directories
-        icon = self.get_indicator(path)
-        display_text = f"{icon} {basename}"
-        node = self.tree_files.insert(parent, 'end', text=display_text, open=False)
-        self.tree_item_to_path[node] = path
-        self.tree_item_original_text[node] = display_text
+        """Populate the tree using scandir for improved performance."""
         try:
-            for entry in os.listdir(path):
-                full_entry = os.path.join(path, entry)
-                if os.path.isdir(full_entry):
-                    self.populate_tree(node, full_entry)
-                else:
-                    file_icon = self.get_indicator(full_entry)
-                    file_display = f"{file_icon} {entry}"
-                    file_node = self.tree_files.insert(node, 'end', text=file_display)
-                    self.tree_item_to_path[file_node] = full_entry
-                    self.tree_item_original_text[file_node] = file_display
+            entries = list(os.scandir(path))
+            entries.sort(key=lambda e: e.name.lower())  # Sort entries
+
+            for entry in entries:
+                full_entry = os.path.join(path, entry.name)
+                icon = self.get_indicator(full_entry)
+                display_text = f"{icon} {entry.name}"
+                node = self.tree_files.insert(parent, 'end', text=display_text, open=False)
+                self.tree_item_to_path[node] = full_entry
+                self.tree_item_original_text[node] = display_text
+                
+                if entry.is_dir():
+                    # Insert a dummy child to show the expand arrow
+                    self.tree_files.insert(node, 'end', text='Loading...')
         except PermissionError:
             pass  # Skip directories that cannot be accessed
+
+    def load_tree_node(self, event):
+        """Load the child nodes when a tree node is expanded."""
+        item = self.tree_files.selection()[0]
+        path = self.tree_item_to_path[item]
+
+        # Remove dummy child
+        if self.tree_files.get_children(item):
+            first_child = self.tree_files.get_children(item)[0]
+            if self.tree_files.item(first_child, 'text') == 'Loading...':
+                self.tree_files.delete(first_child)
+
+        try:
+            entries = list(os.scandir(path))
+            entries.sort(key=lambda e: e.name.lower())
+
+            for entry in entries:
+                full_entry = os.path.join(path, entry.name)
+                icon = self.get_indicator(full_entry)
+                display_text = f"{icon} {entry.name}"
+                node = self.tree_files.insert(item, 'end', text=display_text, open=False)
+                self.tree_item_to_path[node] = full_entry
+                self.tree_item_original_text[node] = display_text
+                
+                if entry.is_dir():
+                    self.tree_files.insert(node, 'end', text='Loading...')
+        except PermissionError:
+            pass
 
     def on_tree_item_double_click(self, event):
         """Toggle file inclusion when a user double-clicks a file node."""

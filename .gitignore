@@ -2,3 +2,5 @@
 # Output and backup files
 output/
 __pycache__/
+__pycache__/file_io_utils.cpython-312.pyc
+__pycache__/gui_components.cpython-312.pyc
