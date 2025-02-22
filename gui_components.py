@@ -23,9 +23,11 @@ from theme_config import ThemeConfig
 import pygments
 from pygments.lexers import get_lexer_for_filename, TextLexer
 from pygments.formatters import get_formatter_by_name
+from pygments.token import Token  # Add this import
 import re
 from tkinterdnd2 import DND_FILES, TkinterDnD  # Updated import
 from pygments.styles import get_all_styles, get_style_by_name
+from app_config import DEFAULT_OUTPUT_FILE, OUTPUT_DIR, BACKUP_DIR
 
 class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support drag-drop
     """
@@ -58,7 +60,7 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
         self.style, self.colors = ThemeConfig.setup_theme()
 
         # Remove duplicate state; listbox becomes the single source of truth.
-        self.master_filename = 'master.txt'
+        self.master_filename = DEFAULT_OUTPUT_FILE
         self.tree_item_to_path = {}
         self.tree_item_original_text = {}
 
@@ -97,6 +99,30 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
         # Configure drag-drop with updated tkinterdnd2
         self.listbox_files.drop_target_register(DND_FILES)
         self.listbox_files.dnd_bind('<<Drop>>', self.handle_drop)
+
+        # Add context management
+        self.contexts = {}
+        self.current_context = None
+        
+        # Add context selector above the file list
+        self.create_context_widgets()
+        
+        # Add focus mode toggle
+        self.create_focus_mode_widgets()
+        
+        # Add quick notes feature
+        self.create_quick_notes()
+
+        # Add editor state tracking
+        self.current_file = None
+        self.editor_modified = False
+        self.editor_history = []  # For recently edited files
+
+        # Bind window close event
+        self.protocol("WM_DELETE_WINDOW", self.quit)
+
+        # Bind triple-click to add all files inside a folder
+        self.tree_files.bind("<Triple-1>", self.on_tree_item_triple_click)
 
     def create_explorer_widgets(self):
         """
@@ -139,26 +165,58 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
         self.tree_files.configure(yscrollcommand=tree_scroll.set)
         tree_scroll.pack(side="right", fill="y")
 
-        # Enhanced preview panel
-        preview_frame = ttk.LabelFrame(self.frame_explorer, text="File Preview")
-        preview_frame.pack(fill="x", padx=5, pady=5)
+        # Enhanced editor panel (replacing preview panel)
+        editor_frame = ttk.LabelFrame(self.frame_explorer, text="File Editor")
+        editor_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        self.preview_text = tk.Text(preview_frame, height=10, wrap="none",
+        # Toolbar for editor
+        toolbar = ttk.Frame(editor_frame)
+        toolbar.pack(fill="x", padx=5, pady=2)
+        
+        ttk.Button(toolbar, text="Save", command=self.save_current_file).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Save As", command=self.save_file_as).pack(side="left", padx=2)
+        ttk.Button(toolbar, text="Revert", command=self.revert_changes).pack(side="left", padx=2)
+        
+        self.file_label = ttk.Label(toolbar, text="No file open")
+        self.file_label.pack(side="right", padx=5)
+        
+        # Editor with line numbers
+        editor_container = ttk.Frame(editor_frame)
+        editor_container.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        self.line_numbers = tk.Text(editor_container, width=4, padx=3, takefocus=0,
+                                  cursor="arrow", state="disabled",
                                   font=Font(family="Consolas", size=10))
-        preview_xscroll = ttk.Scrollbar(preview_frame, orient="horizontal",
-                                      command=self.preview_text.xview)
-        preview_yscroll = ttk.Scrollbar(preview_frame, orient="vertical",
-                                      command=self.preview_text.yview)
+        self.line_numbers.pack(side="left", fill="y")
         
-        self.preview_text.config(xscrollcommand=preview_xscroll.set,
-                               yscrollcommand=preview_yscroll.set)
+        self.editor = tk.Text(editor_container, wrap="none",
+                            font=Font(family="Consolas", size=10),
+                            undo=True, maxundo=-1)
+        self.editor.pack(side="left", fill="both", expand=True)
         
-        self.preview_text.grid(row=0, column=0, sticky="nsew")
-        preview_yscroll.grid(row=0, column=1, sticky="ns")
-        preview_xscroll.grid(row=1, column=0, sticky="ew")
+        # Scrollbars
+        editor_xscroll = ttk.Scrollbar(editor_frame, orient="horizontal",
+                                     command=self.editor.xview)
+        editor_yscroll = ttk.Scrollbar(editor_container, orient="vertical",
+                                     command=self.on_editor_scroll)
         
-        preview_frame.grid_columnconfigure(0, weight=1)
-        preview_frame.grid_rowconfigure(0, weight=1)
+        self.editor.config(xscrollcommand=editor_xscroll.set,
+                          yscrollcommand=editor_yscroll.set)
+        self.line_numbers.config(yscrollcommand=editor_yscroll.set)
+        
+        editor_yscroll.pack(side="right", fill="y")
+        editor_xscroll.pack(side="bottom", fill="x")
+        
+        # Bind editor events
+        self.editor.bind("<<Modified>>", self.on_editor_modified)
+        self.editor.bind("<Key>", self.update_line_numbers)
+        self.editor.bind("<Button-1>", self.update_line_numbers)
+        
+        # Add editor keyboard shortcuts
+        self.bind("<Control-s>", lambda e: self.save_current_file())
+        self.bind("<Control-o>", lambda e: self.open_file())
+        self.bind("<Control-z>", lambda e: self.editor.edit_undo())
+        self.bind("<Control-y>", lambda e: self.editor.edit_redo())
 
     def create_main_widgets(self):
         """
@@ -170,12 +228,12 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
         - Log panel for operation feedback
         """
         # --- Frame for Selected Files List ---
-        frame_files = ttk.LabelFrame(self.frame_main, text="Selected Files")
-        frame_files.pack(side="top", fill="both", expand=True, padx=10, pady=10)
+        self.frame_files = ttk.LabelFrame(self.frame_main, text="Selected Files")  # Store frame reference
+        self.frame_files.pack(side="top", fill="both", expand=True, padx=10, pady=10)
 
-        self.listbox_files = tk.Listbox(frame_files, selectmode="extended")
+        self.listbox_files = tk.Listbox(self.frame_files, selectmode="extended")
         self.listbox_files.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
-        scrollbar = ttk.Scrollbar(frame_files, orient="vertical", command=self.listbox_files.yview)
+        scrollbar = ttk.Scrollbar(self.frame_files, orient="vertical", command=self.listbox_files.yview)
         scrollbar.pack(side="left", fill="y", padx=(0, 10), pady=10)
         self.listbox_files.config(yscrollcommand=scrollbar.set)
 
@@ -410,24 +468,34 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
             self.tree_files.tag_configure("selected", background="lightblue")
 
     def on_tree_selection(self, event):
-        """Update preview panel with first few lines of the selected file."""
+        """Update editor panel with selected file content."""
         selected = self.tree_files.selection()
         if not selected:
-            self.preview_text.delete("1.0", END)
             return
+            
         item = selected[0]
         path = self.tree_item_to_path.get(item)
         if path and os.path.isfile(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()[:10]
-                preview = "".join(lines)
-            except Exception as e:
-                preview = f"Error previewing file: {e}"
+            self.preview_file(path)  # Use existing preview_file method which now uses the editor
         else:
-            preview = ""
-        self.preview_text.delete("1.0", END)
-        self.preview_text.insert("1.0", preview)
+            # Clear editor if no file is selected
+            self.editor.delete("1.0", END)
+            self.current_file = None
+            self.file_label.config(text="No file open")
+            self.editor_modified = False
+
+    def open_file(self, event=None):
+        """Open a file in the editor."""
+        filename = filedialog.askopenfilename(
+            title="Open File",
+            filetypes=[
+                ("All files", "*.*"),
+                ("Python files", "*.py"),
+                ("Text files", "*.txt")
+            ]
+        )
+        if filename:
+            self.preview_file(filename)
 
     def show_context_menu(self, event):
         """Show a context menu to toggle file inclusion on right-click."""
@@ -456,54 +524,154 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
         menu.tk_popup(event.x_root, event.y_root)
 
     def preview_file(self, path):
-        """
-        Display file contents in the preview panel with syntax highlighting.
-        
-        Args:
-            path (str): Path to the file to preview
-            
-        Uses Pygments for syntax highlighting based on file extension.
-        Falls back to plain text if syntax highlighting fails.
-        """
+        """Display file contents in the editor with syntax highlighting."""
         try:
+            # Open and read the new file
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Syntax highlighting
+            # Update editor
+            self.editor.delete('1.0', tk.END)
+            self.editor.insert('1.0', content)
+            
+            # Enhanced syntax highlighting
             try:
-                lexer = get_lexer_for_filename(path)
+                lexer = get_lexer_for_filename(path, stripnl=False)
+                lexer.stripnl = False
             except:
                 lexer = TextLexer()
             
             style = get_style_by_name(self.style_var.get())
-            formatter = get_formatter_by_name('html',
-                                           style=style,
-                                           full=True)
+            self.apply_syntax_highlighting(lexer, style)
             
-            highlighted = pygments.highlight(content, lexer, formatter)
+            # Update state and appearance
+            self.current_file = path
+            self.file_label.config(text=os.path.basename(path))
+            self.editor_modified = False
+            self.update_line_numbers()
             
-            self.preview_text.delete('1.0', tk.END)
-            self.preview_text.insert('1.0', content)
-            
-            # Apply style colors
-            self.preview_text.configure(bg=style.background_color,
-                                     fg=style.styles['Text'].color or 'black')
+            # Configure line numbers appearance
+            self.line_numbers.configure(
+                background=style.background_color,
+                foreground=style.style_for_token(Token.Text)['color']
+            )
             
         except Exception as e:
-            self.log(f"Error previewing file: {e}")
+            self.log(f"Error opening file: {e}")
 
-    def show_file_properties(self, path):
-        stats = os.stat(path)
-        size = f"{stats.st_size / 1024:.1f} KB"
-        modified = datetime.fromtimestamp(stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+    def apply_syntax_highlighting(self, lexer, style):
+        """Apply syntax highlighting to the editor content."""
+        content = self.editor.get("1.0", "end-1c")
+        tokens = lexer.get_tokens(content)
+
+        # Clear existing tags
+        for tag in self.editor.tag_names():
+            if tag != "sel":  # Preserve selection tag
+                self.editor.tag_delete(tag)
         
-        props = f"""
-        Path: {path}
-        Size: {size}
-        Modified: {modified}
-        """
+        def ensure_hex_color(color):
+            """Convert color names/values to proper hex format."""
+            if not color:
+                return self.colors['fg']
+            if color.startswith('#'):
+                return color
+            # Handle 6-char hex without #
+            if len(color) == 6 and all(c in '0123456789abcdefABCDEF' for c in color):
+                return f"#{color}"
+            # Handle 3-char hex without #
+            if len(color) == 3 and all(c in '0123456789abcdefABCDEF' for c in color):
+                return f"#{color[0]*2}{color[1]*2}{color[2]*2}"
+            return self.colors['fg']
         
-        messagebox.showinfo("File Properties", props.strip())
+        # Configure editor colors
+        bg_color = ensure_hex_color(style.background_color) or self.colors['bg']
+        fg_color = ensure_hex_color(style.style_for_token(Token)['color']) or self.colors['fg']
+        
+        self.editor.configure(
+            background=bg_color,
+            foreground=fg_color,
+            insertbackground=fg_color
+        )
+        
+        # Apply highlighting
+        self.editor.mark_set("range_start", "1.0")
+        for token, value in tokens:
+            token_style = style.style_for_token(token)
+            tag_name = str(token).replace('.', '_')
+            
+            # Get and validate colors
+            fg = ensure_hex_color(token_style['color'])
+            bg = ensure_hex_color(token_style.get('bgcolor'))
+            
+            # Configure tag
+            tag_config = {'foreground': fg}
+            if bg:
+                tag_config['background'] = bg
+            
+            # Add font styles
+            if token_style['bold']:
+                tag_config['font'] = Font(family="Consolas", size=10, weight="bold")
+            elif token_style['italic']:
+                tag_config['font'] = Font(family="Consolas", size=10, slant="italic")
+                
+            self.editor.tag_configure(tag_name, **tag_config)
+            
+            # Calculate end position for tag
+            if '\n' in value:
+                end_row = str(int(self.editor.index("range_start").split('.')[0]) + value.count('\n'))
+                end_col = len(value.split('\n')[-1])
+                end = f"{end_row}.{end_col}"
+            else:
+                cur_pos = self.editor.index("range_start")
+                row, col = cur_pos.split('.')
+                end = f"{row}.{int(col) + len(value)}"
+            
+            # Apply tag
+            self.editor.tag_add(tag_name, "range_start", end)
+            self.editor.mark_set("range_start", end)
+
+        # Update line numbers
+        self.line_numbers.configure(
+            background=bg_color,
+            foreground=fg_color
+        )
+
+    def save_current_file(self):
+        """Save changes to the current file."""
+        if not self.current_file or not self.editor_modified:
+            return
+            
+        try:
+            content = self.editor.get("1.0", "end-1c")
+            with open(self.current_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            self.editor_modified = False
+            self.file_label.config(text=self.current_file)
+            self.log(f"Saved changes to {self.current_file}")
+        except Exception as e:
+            self.log(f"Error saving file: {e}")
+            messagebox.showerror("Save Error", str(e))
+
+    def save_file_as(self):
+        """Save the current content to a new file."""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            initialdir=OUTPUT_DIR,
+            initialfile=os.path.basename(self.current_file) if self.current_file else None,
+            filetypes=[("All files", "*.*"), ("Text files", "*.txt")]
+        )
+        
+        if filename:
+            self.current_file = filename
+            self.save_current_file()
+
+    def revert_changes(self):
+        """Revert unsaved changes in the editor."""
+        if self.editor_modified and self.current_file:
+            if messagebox.askyesno("Revert Changes?", 
+                                 "Discard all unsaved changes?"):
+                self.preview_file(self.current_file)
 
     def update_status(self, message):
         self.status_label.config(text=message)
@@ -573,18 +741,37 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
             self.clear_tree_tags(child)
 
     def create_style_selector(self):
-        """Create syntax highlighting style selector."""
-        style_frame = ttk.Frame(self.frame_explorer)
+        """Create syntax highlighting style selector with preview."""
+        style_frame = ttk.LabelFrame(self.frame_explorer, text="Editor Theme")
         style_frame.pack(fill='x', padx=5, pady=5)
         
-        ttk.Label(style_frame, text="Preview Theme:").pack(side='left')
+        # Theme selector with preview
+        select_frame = ttk.Frame(style_frame)
+        select_frame.pack(fill='x', padx=5, pady=5)
         
-        self.style_var = tk.StringVar(value="default")
+        ttk.Label(select_frame, text="Theme:").pack(side='left')
+        
+        self.style_var = tk.StringVar(value="monokai")  # Default to monokai
         styles = sorted(list(get_all_styles()))
-        style_combo = ttk.Combobox(style_frame, textvariable=self.style_var,
-                                 values=styles, state='readonly')
+        style_combo = ttk.Combobox(select_frame, textvariable=self.style_var,
+                                 values=styles, state='readonly', width=20)
         style_combo.pack(side='left', padx=(5,0))
         style_combo.bind('<<ComboboxSelected>>', self.update_preview_style)
+        
+        # Quick theme buttons
+        quick_themes = ttk.Frame(style_frame)
+        quick_themes.pack(fill='x', padx=5, pady=2)
+        
+        for theme in ['monokai', 'vs', 'github-dark', 'solarized-dark', 'solarized-light']:
+            if theme in styles:
+                btn = ttk.Button(quick_themes, text=theme.title(),
+                               command=lambda t=theme: self.quick_change_theme(t))
+                btn.pack(side='left', padx=2)
+
+    def quick_change_theme(self, theme_name):
+        """Quickly switch to a preset theme."""
+        self.style_var.set(theme_name)
+        self.update_preview_style()
 
     def update_preview_style(self, event=None):
         """Update the preview panel with selected style."""
@@ -615,3 +802,316 @@ class FileConcatenatorApp(TkinterDnD.Tk):  # Changed parent class to support dra
                     count += 1
             
             self.log(f"Added {count} dropped file(s).")
+
+    def create_context_widgets(self):
+        """Create widgets for managing different file contexts."""
+        # Create a more prominent context management section
+        self.context_frame = ttk.LabelFrame(self.frame_main, text="💼 Working Context")
+        self.context_frame.pack(fill="x", padx=10, pady=5, before=self.frame_files)
+        
+        # Add help/info button
+        ttk.Button(self.context_frame, text="ℹ️", width=3,
+                  command=self.show_context_help).pack(side="right", padx=5)
+        
+        # Context naming and saving
+        name_frame = ttk.Frame(self.context_frame)
+        name_frame.pack(fill="x", padx=5, pady=5)
+        
+        ttk.Label(name_frame, text="Context Name:").pack(side="left")
+        self.context_name = ttk.Entry(name_frame)
+        self.context_name.pack(side="left", fill="x", expand=True, padx=5)
+        
+        # Context actions
+        btn_frame = ttk.Frame(self.context_frame)
+        btn_frame.pack(fill="x", padx=5, pady=2)
+        
+        ttk.Button(btn_frame, text="💾 Save Context",
+                  command=self.save_current_context).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="📤 Export",
+                  command=self.export_context).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="📥 Import",
+                  command=self.import_context).pack(side="left", padx=2)
+        
+        # Context selector
+        select_frame = ttk.Frame(self.context_frame)
+        select_frame.pack(fill="x", padx=5, pady=5)
+        
+        ttk.Label(select_frame, text="Load Context:").pack(side="left")
+        self.context_combo = ttk.Combobox(select_frame, state="readonly")
+        self.context_combo.pack(side="left", fill="x", expand=True, padx=5)
+        self.context_combo.bind("<<ComboboxSelected>>", self.load_context)
+
+    def show_context_help(self):
+        """Show help dialog explaining contexts."""
+        help_text = """
+        💼 Working Contexts
+
+        A context lets you save and restore your work setup:
+        • Selected files
+        • Notes and comments
+        • Export to share with others
+
+        Example Uses:
+        1. Save different groups of related files
+        2. Keep notes about what you're working on
+        3. Switch between different tasks easily
+        4. Share file groupings with ChatGPT
+
+        How to Use:
+        1. Select files you want to group together
+        2. Add any notes about the files/task
+        3. Give your context a name
+        4. Click 'Save Context'
+        5. Later, select it from the dropdown to restore
+        """
+        messagebox.showinfo("About Working Contexts", help_text.strip())
+
+    def export_context(self):
+        """Export the current context to a markdown file."""
+        if not self.current_context:
+            messagebox.showwarning("Export Context", "No context selected")
+            return
+            
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            initialdir=OUTPUT_DIR,
+            initialfile=f"{self.current_context}.md",
+            filetypes=[("Markdown", "*.md"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                context = self.contexts[self.current_context]
+                
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(f"# {self.current_context}\n\n")
+                    
+                    # Write notes section
+                    if context['notes'].strip():
+                        f.write("## Notes\n\n")
+                        f.write(context['notes'].strip() + "\n\n")
+                    
+                    # Write files section
+                    f.write("## Files\n\n")
+                    for file in context['files']:
+                        f.write(f"- `{file}`\n")
+                    
+                    # Add file previews
+                    f.write("\n## File Previews\n\n")
+                    for file in context['files']:
+                        if os.path.exists(file):
+                            f.write(f"### {os.path.basename(file)}\n\n")
+                            f.write("```\n")
+                            try:
+                                with open(file, 'r', encoding='utf-8') as src:
+                                    # First 10 lines of each file
+                                    preview = ''.join(src.readlines()[:10])
+                                    f.write(preview)
+                            except Exception as e:
+                                f.write(f"Error reading file: {e}")
+                            f.write("\n```\n\n")
+                
+                self.log(f"Exported context to {filename}")
+            except Exception as e:
+                self.log(f"Error exporting context: {e}")
+                messagebox.showerror("Export Error", str(e))
+
+    def import_context(self):
+        """Import a context from a JSON file."""
+        filename = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if filename:
+            try:
+                import json
+                with open(filename) as f:
+                    context = json.load(f)
+                
+                name = os.path.splitext(os.path.basename(filename))[0]
+                self.contexts[name] = context
+                self.update_context_combo()
+                self.log(f"Imported context from {filename}")
+            except Exception as e:
+                self.log(f"Error importing context: {e}")
+                messagebox.showerror("Import Error", str(e))
+
+    def toggle_focus_mode(self):
+        """Toggle focus mode to reduce visual distractions."""
+        if self.focus_var.get():
+            # Simplify UI
+            self.frame_explorer.pack_forget()
+            self.paned.remove(self.frame_explorer)
+            self.geometry("800x600")
+        else:
+            # Restore full UI
+            self.paned.add(self.frame_explorer, weight=1)
+            self.paned.add(self.frame_main, weight=2)
+            self.geometry("1200x800")
+    
+    def save_note(self):
+        """Save current note to the context."""
+        if self.current_context:
+            self.contexts[self.current_context]['notes'] = \
+                self.notes_text.get("1.0", END).strip()
+            self.log("Note saved to current context")
+
+    def update_context_combo(self):
+        """Update the context combo box with saved contexts."""
+        contexts = sorted(self.contexts.keys())
+        self.context_combo['values'] = contexts
+        if contexts:
+            self.context_combo.set(contexts[0])
+
+    def handle_drag_start(self, event):
+        """Handle the start of drag operations."""
+        # Get selected items
+        selections = self.tree_files.selection()
+        if selections:
+            # Store the paths for dragging
+            paths = [self.tree_item_to_path[item] for item in selections]
+            event.data = ' '.join(paths)
+            return True
+        return False
+
+    def handle_drag_motion(self, event):
+        """Handle drag motion over drop targets."""
+        return event.action
+
+    def clear_search(self):
+        """Clear the search box and reset tree view."""
+        self.search_var.set('')
+        self.filter_tree()
+
+    def get_context_summary(self):
+        """Get a summary of the current context."""
+        if not self.current_context:
+            return "No context loaded"
+            
+        context = self.contexts[self.current_context]
+        files_count = len(context['files'])
+        notes_preview = context['notes'][:50] + '...' if len(context['notes']) > 50 else context['notes']
+        
+        return f"Context: {self.current_context}\nFiles: {files_count}\nNotes: {notes_preview}"
+
+    def on_editor_scroll(self, *args):
+        """Sync line numbers with editor scrolling."""
+        self.editor.yview(*args)
+        self.line_numbers.yview(*args)
+
+    def update_line_numbers(self, event=None):
+        """Update the line numbers display."""
+        if not hasattr(self, 'line_numbers'):
+            return
+            
+        lines = self.editor.get("1.0", "end-1c").split("\n")
+        line_count = len(lines)
+        
+        self.line_numbers.config(state="normal")
+        self.line_numbers.delete("1.0", "end")
+        for i in range(1, line_count + 1):
+            self.line_numbers.insert("end", f"{i}\n")
+        self.line_numbers.config(state="disabled")
+
+    def on_editor_modified(self, event=None):
+        """Handle editor content modifications."""
+        if self.editor.edit_modified():
+            self.editor_modified = True
+            if self.current_file:
+                self.file_label.config(text=f"*{self.current_file} (modified)")
+        self.editor.edit_modified(False)
+
+    def create_quick_notes(self):
+        """Create a quick notes panel for temporary thoughts."""
+        notes_frame = ttk.LabelFrame(self.frame_main, text="✏️ Quick Notes")
+        notes_frame.pack(fill="x", padx=10, pady=5, after=self.context_frame)
+        
+        self.notes_text = scrolledtext.ScrolledText(notes_frame, height=3,
+                                                  font=Font(family="Segoe UI", size=10))
+        self.notes_text.pack(fill="x", padx=5, pady=5)
+
+    def save_current_context(self):
+        """Save the current workspace as a named context."""
+        name = self.context_name.get().strip()
+        if not name:
+            messagebox.showwarning("Context Name Required", 
+                                 "Please enter a name for your working context.")
+            return
+        
+        # Get current workspace state
+        self.contexts[name] = {
+            'files': list(self.listbox_files.get(0, END)),
+            'notes': self.notes_text.get("1.0", END).strip(),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        self.current_context = name
+        self.update_context_combo()
+        self.log(f"Saved context: {name}")
+        
+    def load_context(self, event=None):
+        """Load a previously saved context."""
+        name = self.context_combo.get()
+        if not name or name not in self.contexts:
+            return
+        
+        # Check for unsaved changes
+        if self.editor_modified:
+            if not messagebox.askyesno("Unsaved Changes",
+                                     "Loading a new context will discard unsaved changes. Continue?"):
+                return
+        
+        context = self.contexts[name]
+        
+        # Clear current state
+        self.listbox_files.delete(0, END)
+        self.notes_text.delete("1.0", END)
+        
+        # Load context state
+        for file in context['files']:
+            self.listbox_files.insert(END, file)
+        
+        self.notes_text.insert("1.0", context.get('notes', ''))
+        self.current_context = name
+        
+        # Update UI
+        self.context_name.delete(0, END)
+        self.context_name.insert(0, name)
+        self.log(f"Loaded context: {name}")
+
+    def create_focus_mode_widgets(self):
+        """Create focus mode toggle in status bar."""
+        focus_frame = ttk.Frame(self.status_bar)
+        focus_frame.pack(side="right", padx=10)
+        
+        self.focus_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(focus_frame, text="Focus Mode", 
+                       variable=self.focus_var,
+                       command=self.toggle_focus_mode).pack()
+
+    def quit(self):
+        """Override quit to check for unsaved changes."""
+        if self.editor_modified:
+            if messagebox.askyesno("Unsaved Changes", 
+                                 f"Save changes to {self.current_file}?"):
+                self.save_current_file()
+        super().quit()
+
+    def on_tree_item_triple_click(self, event):
+        """Handle triple-click on a folder to add all its files to the list."""
+        item = self.tree_files.identify_row(event.y)
+        if not item:
+            return
+        path = self.tree_item_to_path.get(item)
+        if path and os.path.isdir(path):
+            # Recursively add all files in the folder
+            for root, _, files in os.walk(path):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    current_files = self.listbox_files.get(0, 'end')
+                    if full_path not in current_files:
+                        self.listbox_files.insert('end', full_path)
+            self.log(f"Added all files from folder: {path}")
+            original = self.tree_item_original_text.get(item, "")
+            self.tree_files.item(item, text=f"{original} ✓", tags=("selected",))
+            self.tree_files.tag_configure("selected", background="lightblue")

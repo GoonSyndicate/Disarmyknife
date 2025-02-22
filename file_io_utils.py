@@ -13,6 +13,7 @@ All operations include error handling and logging support.
 import os
 import shutil
 from datetime import datetime
+from app_config import OUTPUT_DIR, BACKUP_DIR
 
 def create_backup(master_filename, log):
     """
@@ -26,10 +27,11 @@ def create_backup(master_filename, log):
     """
     if os.path.exists(master_filename):
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        backup_filename = f"{master_filename}.{timestamp}.bak"
+        backup_name = f"master_{timestamp}.bak"
+        backup_path = os.path.join(BACKUP_DIR, backup_name)
         try:
-            shutil.copy2(master_filename, backup_filename)
-            log(f"Backup created: {backup_filename}")
+            shutil.copy2(master_filename, backup_path)
+            log(f"Backup created: {backup_path}")
         except Exception as e:
             log(f"Error creating backup: {e}")
     else:

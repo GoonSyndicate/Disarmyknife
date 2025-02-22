@@ -74,6 +74,9 @@ class FileConcatenatorApp(tk.Tk):
         self.progress_bar = ttk.Progressbar(self.status_bar, mode='determinate', length=200)
         self.progress_bar.pack(side="right", padx=5, pady=2)
 
+        # Bind triple-click to add folder files automatically
+        self.tree_files.bind("<Triple-1>", self.on_tree_item_triple_click)
+
     def create_explorer_widgets(self):
         # Button to load a directory
         btn_load_dir = ttk.Button(self.frame_explorer, text="Load Directory", command=self.load_directory)
@@ -436,6 +439,25 @@ class FileConcatenatorApp(tk.Tk):
     def update_status(self, message):
         self.status_label.config(text=message)
         self.update_idletasks()
+
+    def on_tree_item_triple_click(self, event):
+        """Handle triple-click on a folder to add all its files to the selection list."""
+        item = self.tree_files.identify_row(event.y)
+        if not item:
+            return
+        path = self.tree_item_to_path.get(item)
+        if path and os.path.isdir(path):
+            # Recursively add all files within the folder
+            for root, _, files in os.walk(path):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    current_files = self.listbox_files.get(0, 'end')
+                    if full_path not in current_files:
+                        self.listbox_files.insert('end', full_path)
+            self.log(f"Added all files from folder: {path}")
+            original = self.tree_item_original_text.get(item, "")
+            self.tree_files.item(item, text=f"{original} ✓", tags=("selected",))
+            self.tree_files.tag_configure("selected", background="lightblue")
 
 
 if __name__ == "__main__":
