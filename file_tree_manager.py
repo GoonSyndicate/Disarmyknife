@@ -28,7 +28,7 @@ class FileTreeManager:
     """
     
     def __init__(self, parent, log_callback, on_select_callback=None, 
-                 on_double_click=None, on_context_menu=None):
+                 on_double_click=None, on_context_menu=None, status_update=None):
         """
         Initialize the file tree manager.
         
@@ -38,12 +38,14 @@ class FileTreeManager:
             on_select_callback: Function to call when file is selected
             on_double_click: Function to call when item is double-clicked
             on_context_menu: Function to call to handle context menu
+            status_update: Function to call to update status bar (optional)
         """
         self.parent = parent
         self.log = log_callback
         self.on_select = on_select_callback
         self.on_double_click = on_double_click
         self.on_context_menu = on_context_menu
+        self.status_update = status_update
         
         self.tree_item_to_path = {}
         self.tree_item_original_text = {}
@@ -105,6 +107,10 @@ class FileTreeManager:
         self.tree_item_to_path.clear()
         self.tree_item_original_text.clear()
 
+        # Update status if available
+        if hasattr(self, 'status_update') and self.status_update:
+            self.status_update(f"Loading directory: {dir_selected}")
+
         # Start loading in a separate thread
         threading.Thread(
             target=self.populate_tree, 
@@ -152,8 +158,8 @@ class FileTreeManager:
         path = self.tree_item_to_path[item]
 
         # Remove dummy child
-        if self.tree.get_children(item):
-            first_child = self.tree.get_children(item)[0]
+        if (children := self.tree.get_children(item)):
+            first_child = children[0]
             if self.tree.item(first_child, 'text') == 'Loading...':
                 self.tree.delete(first_child)
 

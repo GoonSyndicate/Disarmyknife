@@ -34,16 +34,18 @@ class EditorManager:
     logic from the main application.
     """
     
-    def __init__(self, parent, log_callback):
+    def __init__(self, parent, log_callback, status_update=None):
         """
         Initialize the editor manager.
         
         Args:
             parent: Parent widget to contain the editor
             log_callback: Function to use for logging operations
+            status_update: Function to call to update status bar (optional)
         """
         self.parent = parent
         self.log = log_callback
+        self.status_update = status_update
         self.current_file = None
         self.modified = False
         self.theme_name = "monokai"  # Default theme
@@ -187,10 +189,20 @@ class EditorManager:
             self.modified = False
             self.file_label.config(text=os.path.basename(self.current_file))
             self.log(f"Saved changes to {self.current_file}")
+            
+            # Update status if available
+            if hasattr(self, 'status_update') and self.status_update:
+                self.status_update(f"Saved: {os.path.basename(self.current_file)}")
+                
             return True
             
         except Exception as e:
             self.log(f"Error saving file: {e}")
+            
+            # Update status if available
+            if hasattr(self, 'status_update') and self.status_update:
+                self.status_update(f"Error saving file: {e}")
+                
             messagebox.showerror("Save Error", str(e))
             return False
     

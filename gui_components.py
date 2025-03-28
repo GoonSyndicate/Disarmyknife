@@ -27,6 +27,49 @@ from editor_manager import EditorManager
 from file_tree_manager import FileTreeManager
 from search_handler import SearchHandler
 
+# Simple tooltip implementation
+class ToolTip:
+    """Provides a tooltip for any widget."""
+    
+    def __init__(self, widget, text):
+        """
+        Initialize a tooltip for a widget.
+        
+        Args:
+            widget: The widget to attach the tooltip to
+            text: The tooltip text
+        """
+        self.widget = widget
+        self.text = text
+        self.tooltip = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
+
+    def show_tip(self, event=None):
+        """Display the tooltip."""
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+
+        self.tooltip = tk.Toplevel(self.widget)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(
+            self.tooltip, 
+            text=self.text, 
+            background="#FFFFE0", 
+            relief='solid', 
+            borderwidth=1,
+            font=("Segoe UI", "8", "normal")
+        )
+        label.pack()
+
+    def hide_tip(self, event=None):
+        """Hide the tooltip."""
+        if self.tooltip:
+            self.tooltip.destroy()
+        self.tooltip = None
+
 class FileConcatenatorApp(TkinterDnD.Tk):
     """
     Main application window for the File Concatenator utility.
@@ -150,8 +193,10 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         self.context_frame.pack(fill="x", padx=10, pady=5)
         
         # Add help/info button
-        ttk.Button(self.context_frame, text="ℹ️", width=3,
-                  command=self.show_context_help).pack(side="right", padx=5)
+        info_btn = ttk.Button(self.context_frame, text="ℹ️", width=3,
+                            command=self.show_context_help)
+        info_btn.pack(side="right", padx=5)
+        ToolTip(info_btn, "Learn more about Working Contexts")
         
         # Context naming and saving
         name_frame = ttk.Frame(self.context_frame)
@@ -165,12 +210,20 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         btn_frame = ttk.Frame(self.context_frame)
         btn_frame.pack(fill="x", padx=5, pady=2)
         
-        ttk.Button(btn_frame, text="💾 Save Context",
-                  command=self.save_current_context, compound='left').pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="📤 Export",
-                  command=self.export_context, compound='left').pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="📥 Import",
-                  command=self.import_context, compound='left').pack(side="left", padx=2)
+        save_btn = ttk.Button(btn_frame, text="💾 Save Context",
+                           command=self.save_current_context, compound='left')
+        save_btn.pack(side="left", padx=2)
+        ToolTip(save_btn, "Save current files and notes as a named context")
+        
+        export_btn = ttk.Button(btn_frame, text="📤 Export",
+                             command=self.export_context, compound='left')
+        export_btn.pack(side="left", padx=2)
+        ToolTip(export_btn, "Export context to a JSON or Markdown file")
+        
+        import_btn = ttk.Button(btn_frame, text="📥 Import",
+                             command=self.import_context, compound='left')
+        import_btn.pack(side="left", padx=2)
+        ToolTip(import_btn, "Import context from a JSON file")
         
         # Context selector
         select_frame = ttk.Frame(self.context_frame)
@@ -180,6 +233,7 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         self.context_combo = ttk.Combobox(select_frame, state="readonly")
         self.context_combo.pack(side="left", fill="x", expand=True, padx=5)
         self.context_combo.bind("<<ComboboxSelected>>", self.load_context)
+        ToolTip(self.context_combo, "Select a saved context to load")
 
     def _create_quick_notes(self):
         """Create a quick notes panel for temporary thoughts."""
@@ -191,46 +245,70 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         self.notes_text.pack(fill="x", padx=5, pady=5)
 
     def _create_file_list(self):
-        """Create the selected files list panel."""
+        """Create the selected files list panel with reordering."""
         # Frame for Selected Files List
         self.frame_files = ttk.LabelFrame(self.frame_main, text="Selected Files")
         self.frame_files.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self.listbox_files = tk.Listbox(self.frame_files, selectmode="extended", 
-                                      bg=self.colors['bg'],
-                                      fg=self.colors['fg'],
-                                      selectbackground=self.colors['selected'],
-                                      selectforeground='#ffffff',
-                                      borderwidth=1)
-        self.listbox_files.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
-        scrollbar = ttk.Scrollbar(self.frame_files, orient="vertical", command=self.listbox_files.yview)
-        scrollbar.pack(side="left", fill="y", padx=(0, 10), pady=10)
+        # File list container
+        list_frame = ttk.Frame(self.frame_files)
+        list_frame.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+
+        # Listbox
+        self.listbox_files = tk.Listbox(list_frame, selectmode="extended", 
+                                     bg=self.colors['bg'],
+                                     fg=self.colors['fg'],
+                                     selectbackground=self.colors['selected'],
+                                     selectforeground='#ffffff',
+                                     borderwidth=1)
+        self.listbox_files.pack(side="left", fill="both", expand=True)
+        
+        # Scrollbar for listbox
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.listbox_files.yview)
+        scrollbar.pack(side="left", fill="y")
         self.listbox_files.config(yscrollcommand=scrollbar.set)
+        
+        # Reordering buttons
+        btn_frame = ttk.Frame(self.frame_files)
+        btn_frame.pack(side="left", fill="y", padx=(5, 10), pady=10)
+        
+        up_btn = ttk.Button(btn_frame, text="🔼", width=3, command=self.move_item_up)
+        up_btn.pack(side="top", pady=2)
+        ToolTip(up_btn, "Move selected file(s) up")
+        
+        down_btn = ttk.Button(btn_frame, text="🔽", width=3, command=self.move_item_down)
+        down_btn.pack(side="top", pady=2)
+        ToolTip(down_btn, "Move selected file(s) down")
 
     def _create_action_buttons(self):
-        """Create operation buttons with icons for better recognition."""
+        """Create operation buttons with icons and tooltips."""
         frame_buttons = ttk.Frame(self.frame_main)
         frame_buttons.pack(fill="x", padx=10, pady=5)
 
         btn_add = ttk.Button(frame_buttons, text="➕ Add Files", 
-                           command=self.add_files, compound='left')
+                          command=self.add_files, compound='left')
         btn_add.pack(side="left", padx=5)
+        ToolTip(btn_add, "Add files to the list")
 
         btn_remove = ttk.Button(frame_buttons, text="➖ Remove", 
-                              command=self.remove_selected, compound='left')
+                             command=self.remove_selected, compound='left')
         btn_remove.pack(side="left", padx=5)
+        ToolTip(btn_remove, "Remove selected files from the list")
 
         btn_clear = ttk.Button(frame_buttons, text="🗑️ Clear", 
-                             command=self.clear_list, compound='left')
+                            command=self.clear_list, compound='left')
         btn_clear.pack(side="left", padx=5)
+        ToolTip(btn_clear, "Clear the entire file list")
 
         btn_concat = ttk.Button(frame_buttons, text="⚙️ Concatenate", 
-                              command=self.concatenate_files, compound='left')
+                             command=self.concatenate_files, compound='left')
         btn_concat.pack(side="right", padx=5)
+        ToolTip(btn_concat, "Concatenate all files in the list")
         
         btn_exit = ttk.Button(frame_buttons, text="🚪 Exit", 
-                            command=self.quit, compound='left')
+                           command=self.quit, compound='left')
         btn_exit.pack(side="right", padx=5)
+        ToolTip(btn_exit, "Exit the application")
 
     def _create_log_panel(self):
         """Create the log panel."""
@@ -259,9 +337,11 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         focus_frame.pack(side="right", padx=10)
         
         self.focus_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(focus_frame, text="Focus Mode", 
-                       variable=self.focus_var,
-                       command=self.toggle_focus_mode).pack()
+        focus_check = ttk.Checkbutton(focus_frame, text="Focus Mode", 
+                                    variable=self.focus_var,
+                                    command=self.toggle_focus_mode)
+        focus_check.pack()
+        ToolTip(focus_check, "Hide the file explorer for focused work")
 
     def log(self, message):
         """
@@ -284,27 +364,100 @@ class FileConcatenatorApp(TkinterDnD.Tk):
                 if file not in current_files:
                     self.listbox_files.insert(END, file)
                     count += 1
+            
             self.log(f"Added {count} file(s).")
+            self.status_label.config(text=f"{count} file(s) added. Total: {self.listbox_files.size()} files")
 
     def remove_selected(self):
         """Remove the selected file(s) from the list."""
         selected_indices = list(self.listbox_files.curselection())
+        if not selected_indices:
+            self.status_label.config(text="No files selected for removal")
+            return
+            
         selected_indices.sort(reverse=True)
         for index in selected_indices:
             file_path = self.listbox_files.get(index)
             self.listbox_files.delete(index)
             # Update visual indication in tree if file is visible
             self.file_tree_manager.mark_file_selected(file_path, False)
-        self.log("Removed selected file(s).")
+            
+        removed_count = len(selected_indices)
+        self.log(f"Removed {removed_count} selected file(s).")
+        self.status_label.config(text=f"{removed_count} file(s) removed. Remaining: {self.listbox_files.size()} files")
 
     def clear_list(self):
         """Clear all files from the selection list."""
+        if self.listbox_files.size() == 0:
+            self.status_label.config(text="File list is already empty")
+            return
+            
+        file_count = self.listbox_files.size()
+        
         # Clear visual indications from the tree
         for file_path in self.listbox_files.get(0, END):
             self.file_tree_manager.mark_file_selected(file_path, False)
+            
         # Clear the list
         self.listbox_files.delete(0, END)
-        self.log("Cleared file list.")
+        
+        self.log(f"Cleared {file_count} file(s) from list.")
+        self.status_label.config(text=f"File list cleared ({file_count} files removed)")
+
+    def move_item_up(self):
+        """Move selected item(s) up in the listbox."""
+        selected_indices = list(self.listbox_files.curselection())
+        if not selected_indices:
+            self.status_label.config(text="No files selected to move")
+            return
+            
+        # Sort indices to maintain relative order
+        selected_indices.sort()
+        
+        # Skip if top item is already at the top
+        if selected_indices[0] == 0:
+            self.status_label.config(text="Item(s) already at the top")
+            return
+            
+        # Move each selected item up one position
+        for index in selected_indices:
+            if index > 0:  # Not already at the top
+                item = self.listbox_files.get(index)
+                self.listbox_files.delete(index)
+                self.listbox_files.insert(index - 1, item)
+                self.listbox_files.selection_set(index - 1)
+        
+        # Update status
+        self.status_label.config(text="Item(s) moved up")
+        self.log("Reordered file list: item(s) moved up.")
+
+    def move_item_down(self):
+        """Move selected item(s) down in the listbox."""
+        selected_indices = list(self.listbox_files.curselection())
+        if not selected_indices:
+            self.status_label.config(text="No files selected to move")
+            return
+            
+        # Sort indices in reverse to maintain relative order when moving down
+        selected_indices.sort(reverse=True)
+        
+        # Skip if bottom item is already at the bottom
+        last_index = self.listbox_files.size() - 1
+        if selected_indices[0] == last_index:
+            self.status_label.config(text="Item(s) already at the bottom")
+            return
+            
+        # Move each selected item down one position
+        for index in selected_indices:
+            if index < last_index:  # Not already at the bottom
+                item = self.listbox_files.get(index)
+                self.listbox_files.delete(index)
+                self.listbox_files.insert(index + 1, item)
+                self.listbox_files.selection_set(index + 1)
+        
+        # Update status
+        self.status_label.config(text="Item(s) moved down")
+        self.log("Reordered file list: item(s) moved down.")
 
     def concatenate_files(self):
         """Initiate file concatenation process in a separate thread."""
@@ -317,6 +470,7 @@ class FileConcatenatorApp(TkinterDnD.Tk):
                                  "This will create a backup of the existing master file (if any) and overwrite it. Continue?"):
             return
 
+        self.status_label.config(text="Concatenation started...")
         self.log("Starting concatenation process...")
         threading.Thread(target=self.run_concatenation, args=(files,), daemon=True).start()
 
@@ -328,21 +482,36 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             self.log("Cleared existing master file.")
         except Exception as e:
             self.log(f"Error clearing master file: {e}")
+            self.status_label.config(text=f"Error: {e}")
             return
             
         file_io_utils.write_directory_structure(self.master_filename, files, self.log)
-        for file in files:
+        
+        # Update progress as files are processed
+        total_files = len(files)
+        for i, file in enumerate(files):
             content = file_io_utils.load_file(file, self.log)
             if content is not None:
                 file_io_utils.append_to_master(self.master_filename, file, content, self.log)
                 
+                # Update progress in GUI thread
+                progress_pct = int(((i + 1) / total_files) * 100)
+                self.progress_bar["value"] = progress_pct
+                self.status_label.config(text=f"Concatenating: {i+1}/{total_files} files ({progress_pct}%)")
+                self.update_idletasks()  # Force GUI update
+                
         self.log("Concatenation process completed.")
+        self.status_label.config(text=f"Concatenation complete - {total_files} files processed")
         messagebox.showinfo("Completed", f"Files have been concatenated into {self.master_filename}.")
+        
+        # Reset progress bar
+        self.progress_bar["value"] = 0
 
     def on_file_selected(self, path):
         """Handle file selection in the tree view."""
         # Load the file in the editor
-        self.editor_manager.load_file(path)
+        if self.editor_manager.load_file(path):
+            self.status_label.config(text=f"Loaded: {os.path.basename(path)}")
 
     def toggle_file_inclusion(self, path):
         """Toggle inclusion of a file in the selection list."""
@@ -357,11 +526,13 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             self.listbox_files.delete(idx)
             self.log(f"Removed: {path}")
             self.file_tree_manager.mark_file_selected(path, False)
+            self.status_label.config(text=f"Removed: {os.path.basename(path)}")
         else:
             # Add to listbox
             self.listbox_files.insert(END, path)
             self.log(f"Added: {path}")
             self.file_tree_manager.mark_file_selected(path, True)
+            self.status_label.config(text=f"Added: {os.path.basename(path)}")
 
     def show_context_menu(self, path, x, y):
         """Display a context menu for a file."""
@@ -411,6 +582,7 @@ class FileConcatenatorApp(TkinterDnD.Tk):
                     count += 1
             
             self.log(f"Added {count} dropped file(s).")
+            self.status_label.config(text=f"{count} file(s) added via drag and drop")
 
     def show_context_help(self):
         """Show help dialog explaining contexts."""
@@ -419,22 +591,30 @@ class FileConcatenatorApp(TkinterDnD.Tk):
 
     def export_context(self):
         """Export the current context to a file."""
-        self.context_manager.export_context()
+        result = self.context_manager.export_context()
+        if result:
+            self.status_label.config(text="Context exported successfully")
 
     def import_context(self):
         """Import a context from a JSON file."""
         context_name = self.context_manager.import_context()
         if context_name:
             self.update_context_combo()
+            self.status_label.config(text=f"Context '{context_name}' imported")
 
     def save_current_context(self):
         """Save the current workspace as a named context."""
         name = self.context_name.get().strip()
+        if not name:
+            self.status_label.config(text="Please enter a name for the context")
+            return
+            
         files = list(self.listbox_files.get(0, END))
         notes = self.notes_text.get("1.0", END)
         
         if self.context_manager.save_context(name, files, notes):
             self.update_context_combo()
+            self.status_label.config(text=f"Context '{name}' saved")
 
     def update_context_combo(self):
         """Update the context combo box with saved contexts."""
@@ -477,6 +657,8 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         # Update UI
         self.context_name.delete(0, END)
         self.context_name.insert(0, name)
+        
+        self.status_label.config(text=f"Context '{name}' loaded with {len(context['files'])} files")
 
     def toggle_focus_mode(self):
         """Toggle focus mode to reduce visual distractions."""

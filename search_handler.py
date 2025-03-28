@@ -52,15 +52,28 @@ class SearchHandler:
         search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
         search_entry.pack(side='left', fill='x', expand=True)
         
+        # Add tooltip to search entry
+        if 'ToolTip' in globals():
+            ToolTip(search_entry, "Type to search files by name, content or extension")
+        
         self.search_type = tk.StringVar(value="name")
         type_menu = ttk.OptionMenu(search_frame, self.search_type, 
                                  "name", "name", "content", "extension",
                                  command=self._on_search_type_changed)
         type_menu.pack(side='right', padx=(5,0))
         
+        # Add tooltip to search type menu
+        if 'ToolTip' in globals():
+            ToolTip(type_menu, "Select search criteria (filename, file content, or extension)")
+        
         # Clear button with icon
-        ttk.Button(search_frame, text="❌", width=3, 
-                  command=self.clear_search).pack(side='right', padx=2)
+        clear_btn = ttk.Button(search_frame, text="❌", width=3, 
+                             command=self.clear_search)
+        clear_btn.pack(side='right', padx=2)
+        
+        # Add tooltip to clear button
+        if 'ToolTip' in globals():
+            ToolTip(clear_btn, "Clear search")
 
     def clear_search(self):
         """Clear the search box and reset tree view."""
