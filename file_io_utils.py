@@ -91,3 +91,21 @@ def write_directory_structure(master_filename, file_list, log):
         log("Directory structure written to master file.")
     except Exception as e:
         log(f"Error writing directory structure: {e}")
+
+def get_file_content(filename, log):
+    """
+    Read and return the contents of a file for clipboard operations.
+    
+    Args:
+        filename (str): Path to the file to read
+        log (callable): Function to log operations and errors
+        
+    Returns:
+        str: File contents if successful, None if an error occurs
+    """
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        log(f"Error reading file for clipboard: {e}")
+        return None

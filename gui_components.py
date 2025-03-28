@@ -499,13 +499,35 @@ class FileConcatenatorApp(TkinterDnD.Tk):
                 self.progress_bar["value"] = progress_pct
                 self.status_label.config(text=f"Concatenating: {i+1}/{total_files} files ({progress_pct}%)")
                 self.update_idletasks()  # Force GUI update
+        
+        # Copy the generated file content to clipboard
+        try:
+            with open(self.master_filename, 'r', encoding='utf-8') as f:
+                content = f.read()
+                self.clipboard_clear()
+                self.clipboard_append(content)
+                self.log("Copied concatenated content to clipboard.")
                 
+                # Flash visual feedback in status bar
+                self.status_label.config(text="✅ Concatenation complete - Copied to clipboard!")
+                self.status_bar.config(background="#90EE90")  # Light green background
+                
+                # Reset status bar color after 2 seconds
+                self.after(2000, self._reset_status_bar_color)
+        except Exception as e:
+            self.log(f"Error copying to clipboard: {e}")
+            self.status_label.config(text="Concatenation complete, but clipboard copy failed")
+            
         self.log("Concatenation process completed.")
-        self.status_label.config(text=f"Concatenation complete - {total_files} files processed")
-        messagebox.showinfo("Completed", f"Files have been concatenated into {self.master_filename}.")
+        messagebox.showinfo("Completed", f"Files have been concatenated into {self.master_filename} and copied to clipboard.")
         
         # Reset progress bar
         self.progress_bar["value"] = 0
+
+    def _reset_status_bar_color(self):
+        """Reset status bar color after clipboard feedback."""
+        self.status_bar.config(background=self.colors['border'])  # Reset to original color
+        self.status_label.config(text=f"Ready - Last action: Content copied to clipboard")
 
     def on_file_selected(self, path):
         """Handle file selection in the tree view."""
