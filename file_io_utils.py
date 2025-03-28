@@ -82,6 +82,14 @@ def append_to_master(master_filename, filename, content, log):
         log(f"Error appending {filename}: {e}")
 
 def write_directory_structure(master_filename, file_list, log):
+    """
+    Write a directory structure section at the beginning of the master file.
+    
+    Args:
+        master_filename (str): Path to the master file
+        file_list (list): List of files to include in the structure
+        log (callable): Function to log operations and errors
+    """
     try:
         with open(master_filename, 'a', encoding='utf-8') as master_file:
             master_file.write("# Directory Structure\n\n")
@@ -91,21 +99,3 @@ def write_directory_structure(master_filename, file_list, log):
         log("Directory structure written to master file.")
     except Exception as e:
         log(f"Error writing directory structure: {e}")
-
-def get_file_content(filename, log):
-    """
-    Read and return the contents of a file for clipboard operations.
-    
-    Args:
-        filename (str): Path to the file to read
-        log (callable): Function to log operations and errors
-        
-    Returns:
-        str: File contents if successful, None if an error occurs
-    """
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            return f.read()
-    except Exception as e:
-        log(f"Error reading file for clipboard: {e}")
-        return None

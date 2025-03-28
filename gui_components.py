@@ -148,7 +148,8 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             self.log,
             on_select_callback=self.on_file_selected,
             on_double_click=self.toggle_file_inclusion,
-            on_context_menu=self.show_context_menu
+            on_context_menu=self.show_context_menu,
+            status_update=self.update_status  # Pass status update callback
         )
         
         # Initialize search handler - use tree area as parent
@@ -159,7 +160,20 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         )
         
         # Initialize editor manager - use editor area as parent
-        self.editor_manager = EditorManager(self.frame_editor_area, self.log)
+        self.editor_manager = EditorManager(
+            self.frame_editor_area, 
+            self.log,
+            status_update=self.update_status  # Pass status update callback
+        )
+
+    def update_status(self, message):
+        """Update the status bar label with a message.
+        
+        Args:
+            message (str): The message to display in the status bar
+        """
+        self.status_label.config(text=message)
+        self.update_idletasks()  # Force immediate update
 
     def _create_explorer_panel(self):
         """Configure the file explorer panel."""
@@ -502,8 +516,8 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         
         # Copy the generated file content to clipboard
         try:
-            with open(self.master_filename, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content = file_io_utils.load_file(self.master_filename, self.log)
+            if content:
                 self.clipboard_clear()
                 self.clipboard_append(content)
                 self.log("Copied concatenated content to clipboard.")
