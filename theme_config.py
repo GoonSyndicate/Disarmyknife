@@ -49,21 +49,32 @@ class ThemeConfig:
         default_font = Font(family="Segoe UI", size=10)
         heading_font = Font(family="Segoe UI", size=11, weight="bold")
         
-        # Colors
+        # Colors - refined for better visual appeal
         colors = {
-            'bg': '#ffffff',
-            'fg': '#333333',
-            'selected': '#0078d7',
-            'hover': '#e5f3ff',
-            'accent': '#0078d7',
-            'border': '#cccccc'
+            'bg': '#f8f8f8',           # Slightly off-white for less eye strain
+            'fg': '#333333',           # Dark gray text
+            'selected': '#0078d7',     # Bright blue selection
+            'hover': '#e5f3ff',        # Light blue hover state
+            'accent': '#0078d7',       # Accent color matching selection
+            'border': '#dddddd'        # Lighter gray for borders
         }
 
-        # Common widget styles
+        # Common widget styles with improved padding
         style.configure(".",
             font=default_font,
             background=colors['bg'],
             foreground=colors['fg'])
+
+        # Configure button with padding and hover effects
+        style.configure("TButton",
+            padding=5)
+        style.map("TButton",
+            background=[('active', colors['hover']), ('pressed', colors['selected'])],
+            foreground=[('pressed', '#ffffff')])
+            
+        # Configure label with better padding
+        style.configure("TLabel", 
+            padding=(3, 5))
 
         style.configure("Treeview",
             background=colors['bg'],
@@ -75,17 +86,29 @@ class ThemeConfig:
             font=heading_font,
             background=colors['bg'],
             relief="solid",
-            borderwidth=1)
+            borderwidth=1,
+            padding=3)
 
         style.map("Treeview",
             background=[("selected", colors['selected'])],
-            foreground=[("selected", colors['bg'])])
+            foreground=[("selected", '#ffffff')])
 
         # Custom styles
         style.configure("Header.TLabel",
             font=heading_font,
             padding=5)
 
+        # Frame styles
+        style.configure("TFrame",
+            background=colors['bg'])
+        style.configure("TLabelframe",
+            background=colors['bg'])
+        style.configure("TLabelframe.Label",
+            background=colors['bg'],
+            foreground=colors['fg'],
+            padding=(5, 2))
+
+        # StatusBar styles
         style.configure("StatusBar.TFrame",
             background=colors['border'],
             relief="sunken")
@@ -93,5 +116,9 @@ class ThemeConfig:
         style.configure("StatusBar.TLabel",
             background=colors['border'],
             padding=3)
+
+        # PanedWindow styles
+        style.configure("TPanedwindow",
+            background=colors['border'])
 
         return style, colors
