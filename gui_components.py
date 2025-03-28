@@ -26,6 +26,7 @@ from context_manager import ContextManager
 from editor_manager import EditorManager
 from file_tree_manager import FileTreeManager
 from search_handler import SearchHandler
+import token_utils
 
 # Simple tooltip implementation
 class ToolTip:
@@ -134,8 +135,69 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         # Bind window close event
         self.protocol("WM_DELETE_WINDOW", self.quit)
 
+        # Initialize token count tracking
+        self.token_count = 0
+        self.token_encoding = "cl100k_base"  # Default encoding (GPT-4/ChatGPT)
+        
         # Start the application
         self.log("Application started. Use 'Load Directory' to select a folder.")
+
+        # Set initial token count
+        self.update_token_count()
+
+    def on_file_selected(self, path):
+        """Handle file selection in the tree view."""
+        # Load the file in the editor
+        if self.editor_manager.load_file(path):
+            self.status_label.config(text=f"Loaded: {os.path.basename(path)}")
+
+    def toggle_file_inclusion(self, path):
+        """Toggle inclusion of a file in the selection list."""
+        if not path or os.path.isdir(path):
+            return  # Only handle files
+            
+        # Check if file is already in the list
+        current_files = self.listbox_files.get(0, END)
+        if path in current_files:
+            # Remove from listbox
+            idx = current_files.index(path)
+            self.listbox_files.delete(idx)
+            self.log(f"Removed: {path}")
+            self.file_tree_manager.mark_file_selected(path, False)
+            self.status_label.config(text=f"Removed: {os.path.basename(path)}")
+        else:
+            # Add to listbox
+            self.listbox_files.insert(END, path)
+            self.log(f"Added: {path}")
+            self.file_tree_manager.mark_file_selected(path, True)
+            self.status_label.config(text=f"Added: {os.path.basename(path)}")
+
+    def show_context_menu(self, path, x, y):
+        """Display a context menu for a file."""
+        menu = tk.Menu(self, tearoff=0)
+        
+        if os.path.isfile(path):
+            # Get current state
+            current_files = self.listbox_files.get(0, END)
+            is_included = path in current_files
+            
+            # Menu items
+            menu.add_command(
+                label="Remove from List" if is_included else "Add to List",
+                command=lambda: self.toggle_file_inclusion(path)
+            )
+            
+            menu.add_command(
+                label="Open in Editor",
+                command=lambda: self.editor_manager.load_file(path)
+            )
+            
+            menu.add_command(
+                label="Open in Default Application",
+                command=lambda: os.startfile(path)
+            )
+            
+        menu.tk_popup(x, y)
 
     def _setup_component_managers(self):
         """Initialize the component managers."""
@@ -259,14 +321,35 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         self.notes_text.pack(fill="x", padx=5, pady=5)
 
     def _create_file_list(self):
-        """Create the selected files list panel with reordering."""
+        """Create the selected files list panel with reordering and token count."""
         # Frame for Selected Files List
         self.frame_files = ttk.LabelFrame(self.frame_main, text="Selected Files")
         self.frame_files.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # Add token counter at the top
+        token_frame = ttk.Frame(self.frame_files)
+        token_frame.pack(fill="x", padx=10, pady=(5, 0))
+        
+        ttk.Label(token_frame, text="Token Count:").pack(side="left")
+        self.token_label = ttk.Label(token_frame, text="0 tokens")
+        self.token_label.pack(side="left", padx=5)
+        
+        # Token count progress bar
+        self.token_progress = ttk.Progressbar(token_frame, mode='determinate', length=100)
+        self.token_progress.pack(side="left", fill="x", expand=True, padx=5)
+        
+        # Model selector
+        models = list(token_utils.get_model_context_limits().keys())
+        self.model_var = tk.StringVar(value=models[1] if len(models) > 1 else models[0])  # Default to GPT-4
+        model_menu = ttk.Combobox(token_frame, textvariable=self.model_var, 
+                                values=models, state="readonly", width=12)
+        model_menu.pack(side="right", padx=5)
+        model_menu.bind("<<ComboboxSelected>>", self.update_token_count)
+        ttk.Label(token_frame, text="Model:").pack(side="right")
+        
         # File list container
         list_frame = ttk.Frame(self.frame_files)
-        list_frame.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+        list_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 
         # Listbox
         self.listbox_files = tk.Listbox(list_frame, selectmode="extended", 
@@ -313,6 +396,12 @@ class FileConcatenatorApp(TkinterDnD.Tk):
                             command=self.clear_list, compound='left')
         btn_clear.pack(side="left", padx=5)
         ToolTip(btn_clear, "Clear the entire file list")
+
+        # Add Copy Output button
+        btn_copy = ttk.Button(frame_buttons, text="📋 Copy Output", 
+                           command=self.copy_output_to_clipboard, compound='left')
+        btn_copy.pack(side="left", padx=5)
+        ToolTip(btn_copy, "Copy the current master.txt content to clipboard")
 
         btn_concat = ttk.Button(frame_buttons, text="⚙️ Concatenate", 
                              command=self.concatenate_files, compound='left')
@@ -381,6 +470,9 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             
             self.log(f"Added {count} file(s).")
             self.status_label.config(text=f"{count} file(s) added. Total: {self.listbox_files.size()} files")
+            
+            # Update token count
+            self.update_token_count()
 
     def remove_selected(self):
         """Remove the selected file(s) from the list."""
@@ -399,6 +491,9 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         removed_count = len(selected_indices)
         self.log(f"Removed {removed_count} selected file(s).")
         self.status_label.config(text=f"{removed_count} file(s) removed. Remaining: {self.listbox_files.size()} files")
+        
+        # Update token count
+        self.update_token_count()
 
     def clear_list(self):
         """Clear all files from the selection list."""
@@ -417,6 +512,74 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         
         self.log(f"Cleared {file_count} file(s) from list.")
         self.status_label.config(text=f"File list cleared ({file_count} files removed)")
+        
+        # Update token count
+        self.update_token_count()
+
+    def update_token_count(self, event=None):
+        """Update the token count display based on current file selection."""
+        # Get list of files
+        files = self.listbox_files.get(0, END)
+        if not files:
+            self.token_count = 0
+            self.token_label.config(text="0 tokens")
+            self.token_progress["value"] = 0
+            return
+            
+        # Get model context limit
+        model = self.model_var.get()
+        limits = token_utils.get_model_context_limits()
+        limit = limits.get(model, 100000)  # Default to a high number if model not found
+        
+        # Start a background thread to calculate tokens
+        threading.Thread(
+            target=self._calculate_tokens_in_background,
+            args=(files, limit),
+            daemon=True
+        ).start()
+
+    def _calculate_tokens_in_background(self, files, limit):
+        """Calculate token count in the background to avoid freezing the UI."""
+        combined_text = ""
+        
+        # First collect content from all files
+        for file in files:
+            content = file_io_utils.load_file(file, self.log)
+            if content:
+                combined_text += f"\n\n{content}"
+        
+        # Estimate tokens
+        token_count = token_utils.estimate_tokens(combined_text, self.token_encoding)
+        
+        # Update UI in the main thread
+        self.after(0, lambda: self._update_token_display(token_count, limit))
+    
+    def _update_token_display(self, token_count, limit):
+        """Update the token count display in the UI."""
+        self.token_count = token_count if token_count is not None else 0
+        
+        # Format token count
+        formatted_count = token_utils.format_token_count(token_count)
+        
+        # Update token count label
+        if token_count is None:
+            self.token_label.config(text="Unknown (tiktoken not installed)")
+            self.token_progress["value"] = 0
+        else:
+            percentage = min(100, int((token_count / limit) * 100))
+            self.token_label.config(
+                text=f"{formatted_count} ({percentage}% of {limit:,})",
+                foreground="red" if token_count > limit else "black"
+            )
+            self.token_progress["value"] = percentage
+            
+            # Set color based on usage
+            if percentage < 75:
+                self.token_progress["style"] = "green.Horizontal.TProgressbar"
+            elif percentage < 90:
+                self.token_progress["style"] = "yellow.Horizontal.TProgressbar"
+            else:
+                self.token_progress["style"] = "red.Horizontal.TProgressbar"
 
     def move_item_up(self):
         """Move selected item(s) up in the listbox."""
@@ -538,65 +701,6 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         # Reset progress bar
         self.progress_bar["value"] = 0
 
-    def _reset_status_bar_color(self):
-        """Reset status bar color after clipboard feedback."""
-        self.status_bar.config(background=self.colors['border'])  # Reset to original color
-        self.status_label.config(text=f"Ready - Last action: Content copied to clipboard")
-
-    def on_file_selected(self, path):
-        """Handle file selection in the tree view."""
-        # Load the file in the editor
-        if self.editor_manager.load_file(path):
-            self.status_label.config(text=f"Loaded: {os.path.basename(path)}")
-
-    def toggle_file_inclusion(self, path):
-        """Toggle inclusion of a file in the selection list."""
-        if not path or os.path.isdir(path):
-            return  # Only handle files
-            
-        # Check if file is already in the list
-        current_files = self.listbox_files.get(0, END)
-        if path in current_files:
-            # Remove from listbox
-            idx = current_files.index(path)
-            self.listbox_files.delete(idx)
-            self.log(f"Removed: {path}")
-            self.file_tree_manager.mark_file_selected(path, False)
-            self.status_label.config(text=f"Removed: {os.path.basename(path)}")
-        else:
-            # Add to listbox
-            self.listbox_files.insert(END, path)
-            self.log(f"Added: {path}")
-            self.file_tree_manager.mark_file_selected(path, True)
-            self.status_label.config(text=f"Added: {os.path.basename(path)}")
-
-    def show_context_menu(self, path, x, y):
-        """Display a context menu for a file."""
-        menu = tk.Menu(self, tearoff=0)
-        
-        if os.path.isfile(path):
-            # Get current state
-            current_files = self.listbox_files.get(0, END)
-            is_included = path in current_files
-            
-            # Menu items
-            menu.add_command(
-                label="Remove from List" if is_included else "Add to List",
-                command=lambda: self.toggle_file_inclusion(path)
-            )
-            
-            menu.add_command(
-                label="Open in Editor",
-                command=lambda: self.editor_manager.load_file(path)
-            )
-            
-            menu.add_command(
-                label="Open in Default Application",
-                command=lambda: os.startfile(path)
-            )
-            
-        menu.tk_popup(x, y)
-
     def handle_drop(self, event):
         """Handle drag and drop of files."""
         if event.data:
@@ -687,6 +791,9 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             self.listbox_files.insert(END, file)
             # Update visual indication in tree if file is visible
             self.file_tree_manager.mark_file_selected(file, True)
+            
+            # Expand folders to show each selected file
+            self.file_tree_manager.expand_to_path(file)
         
         self.notes_text.insert("1.0", context.get('notes', ''))
         
@@ -715,3 +822,31 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             if not self.editor_manager.prompt_save_changes():
                 return  # Cancel quit if user cancels save
         super().quit()
+
+    def copy_output_to_clipboard(self):
+        """Copy the current content of the master file to clipboard."""
+        if not os.path.exists(self.master_filename):
+            self.log(f"Output file does not exist: {self.master_filename}")
+            self.status_label.config(text="No output file exists yet. Run concatenation first.")
+            return
+            
+        try:
+            # Load the content from the master file
+            content = file_io_utils.load_file(self.master_filename, self.log)
+            if content:
+                # Copy to clipboard
+                self.clipboard_clear()
+                self.clipboard_append(content)
+                self.log(f"Copied output content to clipboard from: {self.master_filename}")
+                
+                # Visual feedback in status bar
+                self.status_label.config(text="✅ Output content copied to clipboard!")
+                self.status_bar.config(background="#90EE90")  # Light green background
+                
+                # Reset status bar color after 2 seconds
+                self.after(2000, self._reset_status_bar_color)
+            else:
+                self.status_label.config(text="Output file is empty")
+        except Exception as e:
+            self.log(f"Error copying output to clipboard: {e}")
+            self.status_label.config(text=f"Error copying to clipboard: {e}")

@@ -121,4 +121,15 @@ class ThemeConfig:
         style.configure("TPanedwindow",
             background=colors['border'])
 
+        # Create colored progress bar styles for token display
+        style.configure("green.Horizontal.TProgressbar", 
+                      background='green',
+                      troughcolor=colors['bg'])
+        style.configure("yellow.Horizontal.TProgressbar", 
+                      background='#f0ad4e',  # Bootstrap warning color
+                      troughcolor=colors['bg'])
+        style.configure("red.Horizontal.TProgressbar", 
+                      background='#d9534f',  # Bootstrap danger color
+                      troughcolor=colors['bg'])
+
         return style, colors

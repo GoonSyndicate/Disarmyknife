@@ -374,3 +374,109 @@ class FileTreeManager:
         ).start()
         
         self.log(f"Refreshed file tree")
+        
+    def expand_to_path(self, path):
+        """
+        Expand the tree to make a specific path visible.
+        
+        Args:
+            path (str): The file path to make visible
+            
+        Returns:
+            bool: True if the path exists in the tree, False otherwise
+        """
+        if not path or not os.path.exists(path):
+            return False
+            
+        # Normalize path for consistent comparison
+        norm_path = os.path.normpath(path)
+        
+        # Find the root directory of the tree
+        root_items = self.tree.get_children("")
+        if not root_items:
+            return False
+            
+        # Let's find the base directory path
+        base_dir = None
+        for item in root_items:
+            if item in self.tree_item_to_path:
+                base_item_path = self.tree_item_to_path[item]
+                if os.path.isdir(base_item_path):
+                    base_dir = base_item_path
+                else:
+                    base_dir = os.path.dirname(base_item_path)
+                break
+        
+        if not base_dir or not norm_path.startswith(base_dir):
+            return False  # Path is not in the current tree
+            
+        # Get the path components to traverse
+        rel_path = os.path.relpath(os.path.dirname(norm_path), base_dir)
+        if rel_path == '.':
+            components = []
+        else:
+            components = rel_path.split(os.sep)
+        
+        # Start from root and traverse down
+        current_path = base_dir
+        current_items = root_items
+        
+        for component in components:
+            next_path = os.path.join(current_path, component)
+            found = False
+            
+            # First check if this component is already loaded in visible nodes
+            for item in current_items:
+                if item in self.tree_item_to_path and self.tree_item_to_path[item] == next_path:
+                    # Found it, expand if it's not already
+                    if not self.tree.item(item, "open"):
+                        self.tree.item(item, open=True)
+                        # Manually trigger node loading if needed
+                        if self.tree.item(item, 'open'):
+                            self.load_tree_node({'widget': self.tree, 'item': item})
+                    
+                    current_items = self.tree.get_children(item)
+                    current_path = next_path
+                    found = True
+                    break
+            
+            if not found:
+                # Component not found in loaded items, we need to manually expand
+                # First search through all items
+                for item_id, item_path in self.tree_item_to_path.items():
+                    if item_path == next_path:
+                        # Found but might be hidden in a collapsed parent
+                        parent = self.tree.parent(item_id)
+                        while parent:
+                            self.tree.item(parent, open=True)
+                            # Trigger loading children
+                            self.load_tree_node({'widget': self.tree, 'item': parent})
+                            # Move up one level
+                            parent = self.tree.parent(parent)
+                        
+                        # Now the item should be visible
+                        self.tree.see(item_id)
+                        if not self.tree.item(item_id, "open") and os.path.isdir(item_path):
+                            self.tree.item(item_id, open=True)
+                            # Trigger loading children
+                            self.load_tree_node({'widget': self.tree, 'item': item_id})
+                        
+                        current_items = self.tree.get_children(item_id)
+                        current_path = next_path
+                        found = True
+                        break
+            
+            if not found:
+                # We've gone as far as we can, path may not be loaded yet
+                return False
+
+        # At this point, we should be at the parent directory of the file
+        # Try to make the file visible if it's loaded
+        file_found = False
+        for item in current_items:
+            if item in self.tree_item_to_path and self.tree_item_to_path[item] == norm_path:
+                self.tree.see(item)
+                file_found = True
+                break
+                
+        return file_found or True  # Return True if we at least got to the parent directory
