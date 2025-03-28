@@ -6,6 +6,7 @@ This module provides a rich text editing component with:
 - Line numbering
 - File loading and saving
 - Change tracking
+- Find and replace functionality
 """
 
 import os
@@ -18,6 +19,363 @@ from pygments.token import Token
 from pygments.styles import get_all_styles, get_style_by_name
 import file_io_utils
 from app_config import OUTPUT_DIR
+import re
+
+# Search dialog for find/replace functionality
+class SearchDialog(tk.Toplevel):
+    """
+    Dialog window for text search and replace operations.
+    
+    Provides:
+    - Find functionality
+    - Replace functionality
+    - Case sensitivity option
+    - Regular expression support
+    """
+    
+    def __init__(self, parent, editor, mode="find"):
+        """
+        Initialize the search dialog.
+        
+        Args:
+            parent: The parent window
+            editor: The text editor widget to search in
+            mode: Either "find" or "replace"
+        """
+        super().__init__(parent)
+        self.editor = editor
+        self.mode = mode
+        
+        # Configure window
+        self.title("Find" if mode == "find" else "Find and Replace")
+        self.transient(parent)  # Make dialog modal
+        self.resizable(False, False)
+        
+        # Set window position near the text widget
+        x = parent.winfo_rootx() + 50
+        y = parent.winfo_rooty() + 50
+        self.geometry(f"+{x}+{y}")
+        
+        # Create dialog contents
+        self.create_widgets()
+        
+        # Bind keys
+        self.bind("<Escape>", lambda e: self.destroy())
+        
+        # Focus the search entry
+        self.search_entry.focus_set()
+        
+        # Internal state
+        self.last_search = None
+        self.last_index = "1.0"
+        self.wrap_occurred = False
+        self.match_indices = []
+        self.current_match_index = -1
+        
+    def create_widgets(self):
+        """Create and arrange the dialog widgets."""
+        # Main frame
+        main_frame = ttk.Frame(self, padding="10 10 10 10")
+        main_frame.pack(fill='both', expand=True)
+        
+        # Search entry
+        search_frame = ttk.Frame(main_frame)
+        search_frame.pack(fill='x', pady=3)
+        
+        ttk.Label(search_frame, text="Find:").pack(side='left', padx=(0, 5))
+        
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
+        self.search_entry.pack(side='left', fill='x', expand=True)
+        
+        # Replace entry (if in replace mode)
+        if self.mode == "replace":
+            replace_frame = ttk.Frame(main_frame)
+            replace_frame.pack(fill='x', pady=3)
+            
+            ttk.Label(replace_frame, text="Replace with:").pack(side='left', padx=(0, 5))
+            
+            self.replace_var = tk.StringVar()
+            self.replace_entry = ttk.Entry(replace_frame, textvariable=self.replace_var, width=30)
+            self.replace_entry.pack(side='left', fill='x', expand=True)
+        
+        # Options frame
+        options_frame = ttk.Frame(main_frame)
+        options_frame.pack(fill='x', pady=(10, 3))
+        
+        # Case sensitivity checkbox
+        self.case_sensitive = tk.BooleanVar()
+        ttk.Checkbutton(options_frame, text="Match case", variable=self.case_sensitive).pack(side='left')
+        
+        # Regexp checkbox
+        self.use_regexp = tk.BooleanVar()
+        ttk.Checkbutton(options_frame, text="Regular expression", variable=self.use_regexp).pack(side='left', padx=(10, 0))
+        
+        # Buttons frame
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill='x', pady=(10, 0))
+        
+        # Find buttons
+        ttk.Button(buttons_frame, text="Find Next", command=self.find_next).pack(side='left')
+        ttk.Button(buttons_frame, text="Find All", command=self.find_all).pack(side='left', padx=(5, 0))
+        
+        # Replace buttons (if in replace mode)
+        if self.mode == "replace":
+            ttk.Button(buttons_frame, text="Replace", command=self.replace_current).pack(side='left', padx=(5, 0))
+            ttk.Button(buttons_frame, text="Replace All", command=self.replace_all).pack(side='left', padx=(5, 0))
+        
+        # Close button
+        ttk.Button(buttons_frame, text="Close", command=self.destroy).pack(side='right')
+        
+        # Status label
+        self.status_var = tk.StringVar()
+        ttk.Label(main_frame, textvariable=self.status_var).pack(pady=(10, 0))
+
+    def find_next(self, from_current=True):
+        """
+        Find the next occurrence of the search text.
+        
+        Args:
+            from_current: If True, search from the current cursor position
+                          If False, search from the beginning of the document
+        
+        Returns:
+            bool: True if a match was found, False otherwise
+        """
+        search_text = self.search_var.get()
+        if not search_text:
+            self.status_var.set("Please enter text to search for")
+            return False
+            
+        # Remove any existing highlight
+        self.editor.tag_remove("search_highlight", "1.0", "end")
+        self.editor.tag_remove("current_match", "1.0", "end")
+        
+        # Get the search parameters
+        if from_current:
+            start_pos = self.editor.index("insert")
+        else:
+            start_pos = "1.0"
+            
+        case_sensitive = self.case_sensitive.get()
+        use_regexp = self.use_regexp.get()
+        
+        # Perform the search
+        if use_regexp:
+            try:
+                if case_sensitive:
+                    pattern = re.compile(search_text)
+                else:
+                    pattern = re.compile(search_text, re.IGNORECASE)
+                    
+                # Get text content to search
+                content = self.editor.get(start_pos, "end")
+                
+                # Convert start position to character offset
+                start_line, start_char = map(int, start_pos.split("."))
+                start_offset = sum(len(line) + 1 for line in self.editor.get("1.0", start_pos).split("\n")) - 1
+                
+                # Search for match
+                match = pattern.search(content)
+                if match:
+                    match_start, match_end = match.span()
+                    match_start += start_offset
+                    match_end += start_offset
+                    
+                    # Convert to line.char format
+                    start_index = self.editor.index(f"1.0 + {match_start} chars")
+                    end_index = self.editor.index(f"1.0 + {match_end} chars")
+                    
+                    # Move cursor and highlight
+                    self.editor.mark_set("insert", start_index)
+                    self.editor.see(start_index)
+                    self.editor.tag_add("current_match", start_index, end_index)
+                    self.editor.tag_config("current_match", background="yellow")
+                    
+                    self.status_var.set(f"Match found")
+                    return True
+                else:
+                    # If not found and we're already searching from the beginning
+                    if not from_current:
+                        self.status_var.set("No matches found")
+                        return False
+                    
+                    # Otherwise wrap around and search from the beginning
+                    self.wrap_occurred = True
+                    return self.find_next(False)
+            except re.error as e:
+                self.status_var.set(f"Invalid regular expression: {e}")
+                return False
+        else:
+            # Standard text search
+            kwargs = {"backwards": False, "nocase": not case_sensitive}
+            
+            result = self.editor.search(search_text, start_pos, "end", **kwargs)
+            
+            if result:
+                match_end = f"{result}+{len(search_text)}c"
+                
+                # Move cursor and highlight
+                self.editor.mark_set("insert", result)
+                self.editor.see(result)
+                self.editor.tag_add("current_match", result, match_end)
+                self.editor.tag_config("current_match", background="yellow")
+                
+                self.status_var.set("Match found")
+                return True
+            else:
+                # If not found and we're already searching from the beginning
+                if not from_current:
+                    self.status_var.set("No matches found")
+                    return False
+                
+                # Otherwise wrap around and search from the beginning
+                self.wrap_occurred = True
+                return self.find_next(False)
+
+    def find_all(self):
+        """Find and highlight all occurrences of the search text."""
+        search_text = self.search_var.get()
+        if not search_text:
+            self.status_var.set("Please enter text to search for")
+            return
+            
+        # Clear existing highlights
+        self.editor.tag_remove("search_highlight", "1.0", "end")
+        self.editor.tag_remove("current_match", "1.0", "end")
+        
+        # Get search parameters
+        case_sensitive = self.case_sensitive.get()
+        use_regexp = self.use_regexp.get()
+        
+        count = 0
+        start_pos = "1.0"
+        
+        if use_regexp:
+            try:
+                if case_sensitive:
+                    pattern = re.compile(search_text)
+                else:
+                    pattern = re.compile(search_text, re.IGNORECASE)
+                    
+                content = self.editor.get("1.0", "end")
+                
+                for match in pattern.finditer(content):
+                    match_start, match_end = match.span()
+                    
+                    # Convert to line.char format
+                    start_index = self.editor.index(f"1.0 + {match_start} chars")
+                    end_index = self.editor.index(f"1.0 + {match_end} chars")
+                    
+                    # Highlight match
+                    self.editor.tag_add("search_highlight", start_index, end_index)
+                    count += 1
+            except re.error as e:
+                self.status_var.set(f"Invalid regular expression: {e}")
+                return
+        else:
+            # Standard text search
+            kwargs = {"backwards": False, "nocase": not case_sensitive}
+            
+            while True:
+                result = self.editor.search(search_text, start_pos, "end", **kwargs)
+                if not result:
+                    break
+                    
+                match_end = f"{result}+{len(search_text)}c"
+                self.editor.tag_add("search_highlight", result, match_end)
+                start_pos = match_end
+                count += 1
+                
+        # Configure the highlight tag
+        self.editor.tag_config("search_highlight", background="lightgreen")
+        
+        # Update status
+        self.status_var.set(f"{count} matches found")
+
+    def replace_current(self):
+        """Replace the current match with the replacement text."""
+        if not self.editor.tag_ranges("current_match"):
+            # No current selection, try to find next match first
+            if not self.find_next():
+                return
+                
+        replace_text = self.replace_var.get()
+        
+        # Get the current match range
+        start, end = self.editor.tag_ranges("current_match")[0], self.editor.tag_ranges("current_match")[1]
+        
+        # Replace the text
+        self.editor.delete(start, end)
+        self.editor.insert(start, replace_text)
+        
+        # Update status
+        self.status_var.set("Replaced occurrence")
+        
+        # Find next occurrence
+        self.find_next()
+
+    def replace_all(self):
+        """Replace all occurrences of the search text with the replacement text."""
+        search_text = self.search_var.get()
+        replace_text = self.replace_var.get()
+        
+        if not search_text:
+            self.status_var.set("Please enter text to search for")
+            return
+            
+        # Get search parameters
+        case_sensitive = self.case_sensitive.get()
+        use_regexp = self.use_regexp.get()
+        
+        # Clear existing highlights
+        self.editor.tag_remove("search_highlight", "1.0", "end")
+        self.editor.tag_remove("current_match", "1.0", "end")
+        
+        if use_regexp:
+            try:
+                # Prepare regexp
+                if case_sensitive:
+                    pattern = re.compile(search_text)
+                else:
+                    pattern = re.compile(search_text, re.IGNORECASE)
+                
+                # Get content
+                content = self.editor.get("1.0", "end-1c")
+                
+                # Perform replacement
+                new_content, count = pattern.subn(replace_text, content)
+                
+                # Update editor content
+                self.editor.delete("1.0", "end")
+                self.editor.insert("1.0", new_content)
+            except re.error as e:
+                self.status_var.set(f"Invalid regular expression: {e}")
+                return
+        else:
+            # Simple text replacement
+            count = 0
+            start_pos = "1.0"
+            kwargs = {"backwards": False, "nocase": not case_sensitive}
+            
+            # Use a modified algorithm to prevent position shifts during replacement
+            while True:
+                result = self.editor.search(search_text, start_pos, "end", **kwargs)
+                if not result:
+                    break
+                    
+                match_end = f"{result}+{len(search_text)}c"
+                
+                # Replace text
+                self.editor.delete(result, match_end)
+                self.editor.insert(result, replace_text)
+                
+                # Move to position after replacement
+                start_pos = f"{result}+{len(replace_text)}c"
+                count += 1
+        
+        # Update status
+        self.status_var.set(f"Replaced {count} occurrences")
 
 class EditorManager:
     """
@@ -110,6 +468,10 @@ class EditorManager:
         self.editor.bind("<<Modified>>", self._on_modified)
         self.editor.bind("<Key>", self.update_line_numbers)
         self.editor.bind("<Button-1>", self.update_line_numbers)
+        
+        # Add key bindings for find/replace
+        self.editor.bind("<Control-f>", self.show_find_dialog)
+        self.editor.bind("<Control-h>", self.show_replace_dialog)
         
         # Theme selection
         self._create_theme_selector()
@@ -405,3 +767,13 @@ class EditorManager:
     def get_frame(self):
         """Return the main frame containing all editor components."""
         return self.frame
+        
+    def show_find_dialog(self, event=None):
+        """Show the find dialog."""
+        SearchDialog(self.parent, self.editor, mode="find")
+        return "break"  # Prevent default behavior
+        
+    def show_replace_dialog(self, event=None):
+        """Show the find and replace dialog."""
+        SearchDialog(self.parent, self.editor, mode="replace")
+        return "break"  # Prevent default behavior
