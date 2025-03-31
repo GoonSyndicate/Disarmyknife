@@ -1,0 +1,41 @@
+{
+  "window": {
+    "width": 1643,
+    "height": 800,
+    "position_x": 187,
+    "position_y": 312
+  },
+  "directories": {
+    "last_directory": null
+  },
+  "output": {
+    "filename": "master.txt",
+    "header_format": "default",
+    "include_line_numbers": false
+  },
+  "editor": {
+    "theme": "monokai"
+  },
+  "encoding": "cl100k_base",
+  "last_session": {
+    "selected_files": [
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\app_config.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\config.json",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\context_manager.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\devdoc.md",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\editor_manager.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\file_io_utils.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\file_tree_manager.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\gui_components.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\main.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\search_handler.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\settings_dialog.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\settings_manager.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\theme_config.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\token_utils.py",
+      "C:/Users/Omni/Documents/GitHub/Disarmyknife\\tooltip.py"
+    ],
+    "quick_notes": "\n\n\n\n\n\n",
+    "editor_file": "C:/Users/Omni/Documents/GitHub/Disarmyknife\\tooltip.py"
+  }
+}
