@@ -14,6 +14,7 @@ import os
 import shutil
 from datetime import datetime
 from app_config import OUTPUT_DIR, BACKUP_DIR
+from settings_manager import settings
 
 def create_backup(master_filename, log):
     """
@@ -71,12 +72,31 @@ def append_to_master(master_filename, filename, content, log):
         content (str): Content to append
         log (callable): Function to log operations and errors
         
-    The content is preceded by a header indicating its source file.
+    The content is preceded by a header indicating its source file,
+    using the format specified in settings.
     """
     try:
         with open(master_filename, 'a', encoding='utf-8') as master_file:
-            master_file.write(f"\n\n# Content from {filename}\n\n")
-            master_file.write(content)
+            # Add the header in the specified format
+            header_format = settings.get_header_format()
+            
+            if header_format == "markdown":
+                master_file.write(f"\n\n## File: {filename}\n\n")
+            elif header_format == "separator":
+                master_file.write(f"\n\n----------------------\n")
+                master_file.write(f"FILE: {filename}\n")
+                master_file.write(f"----------------------\n\n")
+            else:  # default
+                master_file.write(f"\n\n# Content from {filename}\n\n")
+            
+            # Add the content, with line numbers if configured
+            if settings.get_include_line_numbers():
+                lines = content.split('\n')
+                numbered_content = "\n".join(f"{i+1:4d}: {line}" for i, line in enumerate(lines))
+                master_file.write(numbered_content)
+            else:
+                master_file.write(content)
+                
         log(f"Appended content from {filename}")
     except Exception as e:
         log(f"Error appending {filename}: {e}")
