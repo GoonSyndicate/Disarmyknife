@@ -23,14 +23,21 @@ def estimate_tokens(text, encoding_name="cl100k_base"):
         int: The estimated number of tokens, or None if estimation failed
     """
     if not TIKTOKEN_AVAILABLE:
-        return None
+        # Fallback to character-based approximation when tiktoken not available
+        if text:
+            # Rough approximation: ~4 characters per token for English text
+            return len(text) // 4
+        return 0
         
     try:
         encoding = tiktoken.get_encoding(encoding_name)
         num_tokens = len(encoding.encode(text))
         return num_tokens
     except Exception:
-        return None
+        # If encoding fails, fall back to character-based approximation
+        if text:
+            return len(text) // 4
+        return 0
 
 def get_available_encodings():
     """
