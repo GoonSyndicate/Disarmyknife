@@ -27,6 +27,8 @@ from editor_manager import EditorManager
 from file_tree_manager import FileTreeManager
 from search_handler import SearchHandler
 import token_utils
+from settings_manager import settings
+from settings_dialog import SettingsDialog
 
 # Simple tooltip implementation
 class ToolTip:
@@ -88,11 +90,25 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         """Initialize the application window and set up all GUI components."""
         super().__init__()
         self.title("File Concatenator Utility")
-        self.geometry("1200x800")
+        
+        # Apply window size from settings
+        window_settings = settings.get_window_settings()
+        geometry = f"{window_settings['width']}x{window_settings['height']}"
+        if window_settings["position_x"] and window_settings["position_y"]:
+            geometry += f"+{window_settings['position_x']}+{window_settings['position_y']}"
+        self.geometry(geometry)
+        
+        # Save window position on close
+        self.bind("<Configure>", self._on_window_configure)
+        
+        # Add focus event to check for externally modified files
+        self.bind("<FocusIn>", self._on_app_focus)
+        
         self.style, self.colors = ThemeConfig.setup_theme()
 
         # Core application state
-        self.master_filename = DEFAULT_OUTPUT_FILE
+        output_settings = settings.get_output_settings()
+        self.master_filename = os.path.join(OUTPUT_DIR, output_settings["filename"])
 
         # Create the main split pane
         self.paned = ttk.PanedWindow(self, orient="horizontal")
@@ -144,6 +160,55 @@ class FileConcatenatorApp(TkinterDnD.Tk):
 
         # Set initial token count
         self.update_token_count()
+
+        # Restore last session if available
+        self.after(100, self.restore_last_session)  # Short delay to ensure UI is ready
+
+    def _on_window_configure(self, event):
+        """Save window position when it changes."""
+        # Only save if it's the main window changing, not a child window
+        if event.widget == self:
+            # Delay updating to avoid excessive writes
+            self.after_cancel(self._save_position_timer) if hasattr(self, '_save_position_timer') else None
+            self._save_position_timer = self.after(500, self._save_window_position)
+            
+    def _save_window_position(self):
+        """Save the window position to settings."""
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x = self.winfo_rootx()
+        y = self.winfo_rooty()
+        settings.set_window_settings(width, height, x, y)
+
+    def _on_app_focus(self, event):
+        """
+        Check for externally modified files when the application regains focus.
+        
+        Args:
+            event: The focus event
+        """
+        # Only process if the main window receives focus
+        if event.widget != self:
+            return
+            
+        # Check if we have an editor with a file open
+        if hasattr(self, 'editor_manager') and self.editor_manager.current_file:
+            # See if the file has been modified externally
+            try:
+                current_mtime = os.path.getmtime(self.editor_manager.current_file)
+                if hasattr(self.editor_manager, 'last_mtime') and self.editor_manager.last_mtime is not None:
+                    if current_mtime != self.editor_manager.last_mtime and not self.editor_manager.modified:
+                        # File has been modified externally and we have no local changes
+                        response = messagebox.askyesno(
+                            "File Changed Externally",
+                            f"The file '{os.path.basename(self.editor_manager.current_file)}' has been modified outside the editor.\n\n"
+                            "Do you want to reload it?",
+                            icon="info"
+                        )
+                        if response:
+                            self.editor_manager.sync_file()
+            except Exception as e:
+                self.log(f"Error checking for external file changes: {e}")
 
     def on_file_selected(self, path):
         """Handle file selection in the tree view."""
@@ -382,35 +447,49 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         frame_buttons = ttk.Frame(self.frame_main)
         frame_buttons.pack(fill="x", padx=10, pady=5)
 
-        btn_add = ttk.Button(frame_buttons, text="➕ Add Files", 
+        # Create a frame for left-aligned buttons
+        left_buttons = ttk.Frame(frame_buttons)
+        left_buttons.pack(side="left", fill="x", expand=True)
+
+        btn_add = ttk.Button(left_buttons, text="➕ Add Files", 
                           command=self.add_files, compound='left')
         btn_add.pack(side="left", padx=5)
         ToolTip(btn_add, "Add files to the list")
 
-        btn_remove = ttk.Button(frame_buttons, text="➖ Remove", 
+        btn_remove = ttk.Button(left_buttons, text="➖ Remove", 
                              command=self.remove_selected, compound='left')
         btn_remove.pack(side="left", padx=5)
         ToolTip(btn_remove, "Remove selected files from the list")
 
-        btn_clear = ttk.Button(frame_buttons, text="🗑️ Clear", 
+        btn_clear = ttk.Button(left_buttons, text="🗑️ Clear", 
                             command=self.clear_list, compound='left')
         btn_clear.pack(side="left", padx=5)
         ToolTip(btn_clear, "Clear the entire file list")
 
         # Add Copy Output button
-        btn_copy = ttk.Button(frame_buttons, text="📋 Copy Output", 
+        btn_copy = ttk.Button(left_buttons, text="📋 Copy Output", 
                            command=self.copy_output_to_clipboard, compound='left')
         btn_copy.pack(side="left", padx=5)
         ToolTip(btn_copy, "Copy the current master.txt content to clipboard")
+        
+        # Add Settings button
+        btn_settings = ttk.Button(left_buttons, text="⚙️ Settings", 
+                               command=self.show_settings_dialog, compound='left')
+        btn_settings.pack(side="left", padx=5)
+        ToolTip(btn_settings, "Configure output format and application settings")
 
-        btn_concat = ttk.Button(frame_buttons, text="⚙️ Concatenate", 
+        # Create a frame for right-aligned buttons
+        right_buttons = ttk.Frame(frame_buttons)
+        right_buttons.pack(side="right")
+
+        btn_concat = ttk.Button(right_buttons, text="⚙️ Concatenate", 
                              command=self.concatenate_files, compound='left')
-        btn_concat.pack(side="right", padx=5)
+        btn_concat.pack(side="left", padx=5)
         ToolTip(btn_concat, "Concatenate all files in the list")
         
-        btn_exit = ttk.Button(frame_buttons, text="🚪 Exit", 
+        btn_exit = ttk.Button(right_buttons, text="🚪 Exit", 
                            command=self.quit, compound='left')
-        btn_exit.pack(side="right", padx=5)
+        btn_exit.pack(side="left", padx=5)
         ToolTip(btn_exit, "Exit the application")
 
     def _create_log_panel(self):
@@ -530,6 +609,9 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         model = self.model_var.get()
         limits = token_utils.get_model_context_limits()
         limit = limits.get(model, 100000)  # Default to a high number if model not found
+        
+        # Get encoding from settings
+        self.token_encoding = settings.get_encoding()
         
         # Start a background thread to calculate tokens
         threading.Thread(
@@ -816,11 +898,77 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             self.paned.add(self.frame_main, weight=2)
             self.geometry("1200x800")
     
+    def restore_last_session(self):
+        """Restore the last session data if available."""
+        session_data = settings.get_last_session()
+        if not session_data:
+            return
+            
+        selected_files = session_data.get("selected_files", [])
+        quick_notes = session_data.get("quick_notes", "")
+        editor_file = session_data.get("editor_file")
+        
+        if selected_files:
+            # Load the last directory first to ensure files can be found in tree
+            if selected_files and os.path.exists(selected_files[0]):
+                parent_dir = os.path.dirname(selected_files[0])
+                if os.path.isdir(parent_dir):
+                    self.file_tree_manager.load_directory(parent_dir)
+                    
+            # Short delay to ensure directory is loaded
+            self.after(200, lambda: self._continue_session_restore(selected_files, quick_notes, editor_file))
+        elif quick_notes or editor_file:
+            # If only notes or editor file but no selected files
+            self._restore_notes_and_editor(quick_notes, editor_file)
+            
+    def _continue_session_restore(self, selected_files, quick_notes, editor_file):
+        """Continue restoring session after directory load."""
+        valid_files = []
+        for file in selected_files:
+            if os.path.exists(file):
+                self.listbox_files.insert(tk.END, file)
+                self.file_tree_manager.mark_file_selected(file, True)
+                self.file_tree_manager.expand_to_path(file)
+                valid_files.append(file)
+            else:
+                self.log(f"Warning: File from previous session not found: {file}")
+                
+        if valid_files:
+            self.log(f"Restored {len(valid_files)} file(s) from previous session")
+            
+        self._restore_notes_and_editor(quick_notes, editor_file)
+        
+        # Update token count based on restored files
+        self.update_token_count()
+        
+    def _restore_notes_and_editor(self, quick_notes, editor_file):
+        """Restore quick notes and editor file."""
+        # Restore notes
+        if quick_notes:
+            self.notes_text.delete("1.0", tk.END)
+            self.notes_text.insert("1.0", quick_notes)
+            
+        # Restore editor file
+        if editor_file and os.path.exists(editor_file):
+            self.editor_manager.load_file(editor_file)
+            self.log(f"Restored editor file: {editor_file}")
+
     def quit(self):
-        """Override quit to check for unsaved changes."""
+        """Override quit to check for unsaved changes and save settings."""
         if self.editor_manager.has_unsaved_changes():
             if not self.editor_manager.prompt_save_changes():
                 return  # Cancel quit if user cancels save
+                
+        # Save session data
+        selected_files = list(self.listbox_files.get(0, tk.END))
+        quick_notes = self.notes_text.get("1.0", tk.END)
+        editor_file = self.editor_manager.current_file
+        settings.set_last_session(selected_files, quick_notes, editor_file)
+                
+        # Save settings before exiting
+        self._save_window_position()
+        settings.save_settings()
+        
         super().quit()
 
     def copy_output_to_clipboard(self):
@@ -850,3 +998,30 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         except Exception as e:
             self.log(f"Error copying output to clipboard: {e}")
             self.status_label.config(text=f"Error copying to clipboard: {e}")
+
+    def load_directory(self):
+        """Open dialog to select and load a directory."""
+        initial_dir = settings.get_last_directory() or os.path.expanduser("~")
+        dir_selected = filedialog.askdirectory(title="Select Directory", initialdir=initial_dir)
+        if not dir_selected:
+            return None
+
+        # Save the selected directory in settings
+        settings.set_last_directory(dir_selected)
+        settings.save_settings()
+        
+        # Use the modified load_directory method from file_tree_manager
+        self.file_tree_manager.load_directory(dir_selected)
+
+    def show_settings_dialog(self):
+        """Show the settings dialog."""
+        SettingsDialog(self)
+        
+        # After dialog closes, update the output file if it changed
+        output_settings = settings.get_output_settings()
+        self.master_filename = os.path.join(OUTPUT_DIR, output_settings["filename"])
+        
+        # Apply editor theme if it changed
+        if hasattr(self, 'editor_manager'):
+            theme = settings.get_editor_theme()
+            self.editor_manager.set_theme(theme)
