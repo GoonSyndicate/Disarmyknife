@@ -96,11 +96,17 @@ class FileTreeManager:
         self.tree.configure(yscrollcommand=tree_scroll.set)
         tree_scroll.pack(side="right", fill="y")
         
-    def load_directory(self):
+    def load_directory(self, path=None):
         """Open dialog to select and load a directory."""
-        dir_selected = filedialog.askdirectory(title="Select Directory")
-        if not dir_selected:
-            return None
+        if path is None:
+            dir_selected = filedialog.askdirectory(title="Select Directory")
+            if not dir_selected:
+                return None
+        else:
+            dir_selected = path
+            if not os.path.isdir(dir_selected):
+                self.log(f"Invalid directory path: {dir_selected}")
+                return None
 
         # Clear existing data
         self.tree.delete(*self.tree.get_children())

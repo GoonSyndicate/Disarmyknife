@@ -432,6 +432,10 @@ class EditorManager:
                  command=self.revert_changes, 
                  compound='left').pack(side="left", padx=2)
         
+        ttk.Button(toolbar, text="🔄 Sync", 
+                 command=self.sync_file, 
+                 compound='left').pack(side="left", padx=2)
+        
         self.file_label = ttk.Label(toolbar, text="No file open")
         self.file_label.pack(side="right", padx=5)
         
@@ -456,7 +460,6 @@ class EditorManager:
                                command=self.editor.xview)
         y_scroll = ttk.Scrollbar(editor_container, orient="vertical",
                                command=self._on_scroll)
-        
         self.editor.config(xscrollcommand=x_scroll.set,
                           yscrollcommand=y_scroll.set)
         self.line_numbers.config(yscrollcommand=y_scroll.set)
@@ -473,15 +476,15 @@ class EditorManager:
         self.editor.bind("<Control-f>", self.show_find_dialog)
         self.editor.bind("<Control-h>", self.show_replace_dialog)
         
-        # Theme selection
+        # Theme selector
         self._create_theme_selector()
-
+        
     def _create_theme_selector(self):
-        """Create the theme selector widget with consistent styling."""
+        """Create the theme selector widget."""
         style_frame = ttk.LabelFrame(self.parent, text="Editor Theme")
         style_frame.pack(fill='x', padx=5, pady=5)
         
-        # Theme selector with preview
+        # Theme selector
         select_frame = ttk.Frame(style_frame)
         select_frame.pack(fill='x', padx=5, pady=5)
         
@@ -494,7 +497,7 @@ class EditorManager:
         style_combo.pack(side='left', padx=(5,0))
         style_combo.bind('<<ComboboxSelected>>', self._on_theme_change)
         
-        # Quick theme buttons with consistent styling
+        # Quick theme buttons
         quick_themes = ttk.Frame(style_frame)
         quick_themes.pack(fill='x', padx=5, pady=2)
         
@@ -503,7 +506,7 @@ class EditorManager:
                 btn = ttk.Button(quick_themes, text=theme.title(),
                                command=lambda t=theme: self.set_theme(t))
                 btn.pack(side='left', padx=2)
-
+                
     def load_file(self, path):
         """
         Load a file into the editor.
@@ -532,6 +535,15 @@ class EditorManager:
             self.modified = False
             self.update_line_numbers()
             
+            # Store the file's last modification time
+            if os.path.exists(path):
+                self.last_mtime = os.path.getmtime(path)
+            else:
+                self.last_mtime = None
+                
+            # Reset the editor's modified flag to avoid false detection
+            self.editor.edit_modified(False)
+                
             return True
             
         except Exception as e:
@@ -551,6 +563,9 @@ class EditorManager:
             self.modified = False
             self.file_label.config(text=os.path.basename(self.current_file))
             self.log(f"Saved changes to {self.current_file}")
+            
+            # Update the last modification time
+            self.last_mtime = os.path.getmtime(self.current_file)
             
             # Update status if available
             if hasattr(self, 'status_update') and self.status_update:
@@ -595,21 +610,95 @@ class EditorManager:
         if filename:
             return self.load_file(filename)
         return False
-    
+
     def revert_changes(self):
         """Revert unsaved changes in the editor."""
         if self.modified and self.current_file:
             if messagebox.askyesno("Revert Changes?", 
                                  "Discard all unsaved changes?"):
                 return self.load_file(self.current_file)
+        elif not self.modified and self.current_file:
+            # If no local changes, just check for external changes
+            return self.sync_file()
         return False
-    
+        
+    def sync_file(self):
+        """
+        Check if the file has been modified externally and reload it.
+        
+        Returns:
+            bool: True if the file was reloaded, False if not needed or failed
+        """
+        if not self.current_file or not os.path.exists(self.current_file):
+            self.log("No file to sync or file does not exist")
+            if hasattr(self, 'status_update') and self.status_update:
+                self.status_update("No file to sync")
+            return False
+        
+        try:
+            # Check if the file has been modified externally
+            current_mtime = os.path.getmtime(self.current_file)
+            
+            if not hasattr(self, 'last_mtime') or self.last_mtime is None:
+                self.last_mtime = current_mtime
+                return False
+                
+            if current_mtime != self.last_mtime:
+                # File has been modified externally
+                if self.modified:
+                    # If we have unsaved changes, ask for confirmation
+                    response = messagebox.askyesno(
+                        "File Changed Externally",
+                        f"The file '{os.path.basename(self.current_file)}' has been modified outside the editor.\n\n"
+                        "You have unsaved changes. Do you want to reload the file and lose your changes?",
+                        icon="warning"
+                    )
+                    if not response:
+                        # User chose to keep their changes
+                        self.log("Sync canceled, keeping local changes")
+                        if hasattr(self, 'status_update') and self.status_update:
+                            self.status_update("Sync canceled, keeping local changes")
+                        return False
+                
+                # Reload the file
+                content = file_io_utils.load_file(self.current_file, self.log)
+                if content is None:
+                    self.log("Error reloading file during sync")
+                    if hasattr(self, 'status_update') and self.status_update:
+                        self.status_update("Error reloading file during sync")
+                    return False
+                    
+                # Update editor content and state
+                self.editor.delete('1.0', tk.END)
+                self.editor.insert('1.0', content)
+                self._apply_syntax_highlighting(self.current_file)
+                self.modified = False
+                self.last_mtime = current_mtime
+                self.update_line_numbers()
+                
+                self.log(f"Synced file: {self.current_file} (reloaded external changes)")
+                if hasattr(self, 'status_update') and self.status_update:
+                    self.status_update("Synced with external changes")
+                return True
+            else:
+                self.log("File is already in sync with external version")
+                if hasattr(self, 'status_update') and self.status_update:
+                    self.status_update("File is already in sync")
+                return False
+                
+        except Exception as e:
+            self.log(f"Error syncing file: {e}")
+            if hasattr(self, 'status_update') and self.status_update:
+                self.status_update(f"Error syncing file: {e}")
+            return False
+
     def has_unsaved_changes(self):
         """Check if the editor has unsaved changes."""
         return self.modified
     
     def prompt_save_changes(self):
-        """Prompt the user to save changes if needed.
+        """
+        Prompt the user to save changes if needed.
         
         Returns:
             bool: True if the operation can proceed (changes saved or discarded),
@@ -622,20 +711,19 @@ class EditorManager:
             "Unsaved Changes",
             f"Save changes to {os.path.basename(self.current_file) if self.current_file else 'document'}?"
         )
-        
         if response is None:  # Cancel
             return False
         if response is True:  # Yes, save
             return self.save_file()
         return True  # No, discard changes
-    
+        
     def set_theme(self, theme_name):
         """Set the syntax highlighting theme."""
         self.style_var.set(theme_name)
         self.theme_name = theme_name
         if self.current_file:
             self._apply_syntax_highlighting(self.current_file)
-    
+            
     def _on_theme_change(self, event=None):
         """Handle theme change events."""
         self.theme_name = self.style_var.get()
@@ -644,7 +732,7 @@ class EditorManager:
     
     def _apply_syntax_highlighting(self, path):
         """Apply syntax highlighting based on file type."""
-        try:
+        try:            
             # Get an appropriate lexer for the file type
             try:
                 lexer = get_lexer_for_filename(path, stripnl=False)
@@ -654,7 +742,6 @@ class EditorManager:
             
             # Apply the selected style
             style = get_style_by_name(self.theme_name)
-            
             content = self.editor.get("1.0", "end-1c")
             tokens = lexer.get_tokens(content)
 
@@ -680,11 +767,14 @@ class EditorManager:
             # Configure editor colors
             bg_color = ensure_hex_color(style.background_color, "#ffffff")
             fg_color = ensure_hex_color(style.style_for_token(Token)['color'], "#000000")
-            
             self.editor.configure(
                 background=bg_color,
                 foreground=fg_color,
                 insertbackground=fg_color
+            )
+            self.line_numbers.configure(
+                background=bg_color,
+                foreground=fg_color    
             )
             
             # Apply highlighting
@@ -707,7 +797,6 @@ class EditorManager:
                     tag_config['font'] = Font(family="Consolas", size=10, weight="bold")
                 elif token_style['italic']:
                     tag_config['font'] = Font(family="Consolas", size=10, slant="italic")
-                    
                 self.editor.tag_configure(tag_name, **tag_config)
                 
                 # Calculate end position for tag
@@ -719,16 +808,10 @@ class EditorManager:
                     cur_pos = self.editor.index("range_start")
                     row, col = cur_pos.split('.')
                     end = f"{row}.{int(col) + len(value)}"
-                
+                            
                 # Apply tag
                 self.editor.tag_add(tag_name, "range_start", end)
                 self.editor.mark_set("range_start", end)
-
-            # Update line numbers
-            self.line_numbers.configure(
-                background=bg_color,
-                foreground=fg_color
-            )
                 
         except Exception as e:
             self.log(f"Error applying syntax highlighting: {e}")
@@ -746,27 +829,54 @@ class EditorManager:
         for i in range(1, line_count + 1):
             self.line_numbers.insert("end", f"{i}\n")
         self.line_numbers.config(state="disabled")
-    
+        
     def _on_scroll(self, *args):
         """Synchronize scrolling between editor and line numbers."""
         self.editor.yview(*args)
         self.line_numbers.yview(*args)
-    
+        
     def _on_modified(self, event=None):
         """Handle editor content modifications."""
         if self.editor.edit_modified():
-            self.modified = True
-            if self.current_file:
-                self.file_label.config(text=f"*{os.path.basename(self.current_file)} (modified)")
-        self.editor.edit_modified(False)
-    
-    def get_editor_widget(self):
-        """Return the editor widget for binding external events."""
-        return self.editor
-    
-    def get_frame(self):
-        """Return the main frame containing all editor components."""
-        return self.frame
+            # Only mark as modified if content has actually changed from the original
+            if not self.modified:
+                # This is the first modification since loading or saving
+                self.modified = True
+                if self.current_file:
+                    self.file_label.config(text=f"*{os.path.basename(self.current_file)} (modified)")
+
+        # Important: don't reset the modification flag here to allow future change detection
+        # self.editor.edit_modified(False)  # This line is causing the issue
+
+    # Add a new method to check if actual content has changed
+    def has_unsaved_changes(self):
+        """
+        Check if the editor has unsaved changes by comparing content.
+        
+        Returns:
+            bool: True if there are actual unsaved changes, False otherwise
+        """
+        if not self.modified:
+            return False
+            
+        if not self.current_file:
+            # New file with content is considered modified
+            return len(self.editor.get("1.0", "end-1c").strip()) > 0
+            
+        try:
+            # Compare current content with file content
+            current_content = self.editor.get("1.0", "end-1c")
+            file_content = file_io_utils.load_file(self.current_file, lambda _: None)
+            
+            if file_content is None:
+                # Cannot read file, assume modified
+                return True
+                
+            # Compare actual content
+            return current_content != file_content
+        except:
+            # If any error occurs, assume modified to be safe
+            return True
         
     def show_find_dialog(self, event=None):
         """Show the find dialog."""
@@ -777,3 +887,11 @@ class EditorManager:
         """Show the find and replace dialog."""
         SearchDialog(self.parent, self.editor, mode="replace")
         return "break"  # Prevent default behavior
+        
+    def get_editor_widget(self):
+        """Return the editor widget for binding external events."""
+        return self.editor
+    
+    def get_frame(self):
+        """Return the main frame containing all editor components."""
+        return self.frame
