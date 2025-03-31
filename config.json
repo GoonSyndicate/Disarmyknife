@@ -2,8 +2,8 @@
   "window": {
     "width": 1643,
     "height": 800,
-    "position_x": 187,
-    "position_y": 312
+    "position_x": 195,
+    "position_y": 343
   },
   "directories": {
     "last_directory": null
@@ -35,7 +35,7 @@
       "C:/Users/Omni/Documents/GitHub/Disarmyknife\\token_utils.py",
       "C:/Users/Omni/Documents/GitHub/Disarmyknife\\tooltip.py"
     ],
-    "quick_notes": "\n\n\n\n\n\n",
+    "quick_notes": "\n\n\n\n\n\n\n",
     "editor_file": "C:/Users/Omni/Documents/GitHub/Disarmyknife\\tooltip.py"
   }
 }

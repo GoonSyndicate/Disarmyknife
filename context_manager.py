@@ -237,23 +237,26 @@ class ContextManager:
             str: Formatted help text
         """
         return """
-        💼 Working Contexts
+        📸 Task Snapshots (formerly Working Contexts)
 
-        A context lets you save and restore your work setup:
-        • Selected files
-        • Notes and comments
-        • Export to share with others
+        A Task Snapshot lets you quickly save and restore your work setup:
+        • Selected files relevant to your current task
+        • Notes, prompts, or instructions for yourself or an LLM
+        • Export to share with others or future you
 
         Example Uses:
-        1. Save different groups of related files
-        2. Keep notes about what you're working on
-        3. Switch between different tasks easily
-        4. Share file groupings with ChatGPT
+        1. Create LLM prompt kits with relevant code files
+        2. Switch between different parts of a project instantly
+        3. Prepare multiple ChatGPT inputs without losing your place
+        4. Track different aspects of a complex task
 
         How to Use:
-        1. Select files you want to group together
-        2. Add any notes about the files/task
-        3. Give your context a name
-        4. Click 'Save Context'
-        5. Later, select it from the dropdown to restore
+        1. Select files related to your current task
+        2. Add notes or instructions 
+        3. The name will be auto-suggested, or customize it
+        4. Click 'Save Snapshot'
+        5. Later, select from the dropdown to restore everything
+
+        Tip: The * indicator shows when your current work differs from 
+        the saved snapshot. Save frequently to track your progress.
         """

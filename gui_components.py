@@ -134,7 +134,10 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         self.frame_main = ttk.Frame(self.paned)
         self.paned.add(self.frame_main, weight=2)
 
-        # Set up component managers
+        # Create log panel early so we can use self.log
+        self._create_log_panel()
+
+        # Set up component managers - now log method is available
         self._setup_component_managers()
         
         # Create the UI components
@@ -163,6 +166,24 @@ class FileConcatenatorApp(TkinterDnD.Tk):
 
         # Restore last session if available
         self.after(100, self.restore_last_session)  # Short delay to ensure UI is ready
+
+    def log(self, message):
+        """
+        Add a timestamped message to the log panel.
+        
+        Args:
+            message (str): The message to log
+        """
+        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S] ")
+        self.log_text.insert("end", timestamp + message + "\n")
+        self.log_text.see("end")
+
+    def _create_log_panel(self):
+        """Create the log panel."""
+        frame_log = ttk.LabelFrame(self.frame_main, text="Log")
+        frame_log.pack(fill="both", expand=True, padx=10, pady=10)
+        self.log_text = scrolledtext.ScrolledText(frame_log, wrap="word", height=10)
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=10)
 
     def _on_window_configure(self, event):
         """Save window position when it changes."""
@@ -312,38 +333,38 @@ class FileConcatenatorApp(TkinterDnD.Tk):
 
     def _create_main_panel(self):
         """Configure the main panel with file list and log."""
+        # Create selected files list first
+        self._create_file_list()
+        
         # Create context management widgets
         self._create_context_widgets()
         
         # Create quick notes area
         self._create_quick_notes()
         
-        # Create selected files list
-        self._create_file_list()
-        
         # Create action buttons
         self._create_action_buttons()
         
-        # Create log panel
-        self._create_log_panel()
+        # Set up context change tracking (after all widgets are created)
+        self._setup_context_change_tracking()
 
     def _create_context_widgets(self):
         """Create widgets for managing different file contexts."""
         # Create a context management section
-        self.context_frame = ttk.LabelFrame(self.frame_main, text="💼 Working Context")
+        self.context_frame = ttk.LabelFrame(self.frame_main, text="💼 Task Snapshot")
         self.context_frame.pack(fill="x", padx=10, pady=5)
         
         # Add help/info button
         info_btn = ttk.Button(self.context_frame, text="ℹ️", width=3,
                             command=self.show_context_help)
         info_btn.pack(side="right", padx=5)
-        ToolTip(info_btn, "Learn more about Working Contexts")
+        ToolTip(info_btn, "Learn more about Task Snapshots (formerly Working Contexts)")
         
         # Context naming and saving
         name_frame = ttk.Frame(self.context_frame)
         name_frame.pack(fill="x", padx=5, pady=5)
         
-        ttk.Label(name_frame, text="Context Name:").pack(side="left")
+        ttk.Label(name_frame, text="Snapshot Name:").pack(side="left")
         self.context_name = ttk.Entry(name_frame)
         self.context_name.pack(side="left", fill="x", expand=True, padx=5)
         
@@ -351,39 +372,118 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         btn_frame = ttk.Frame(self.context_frame)
         btn_frame.pack(fill="x", padx=5, pady=2)
         
-        save_btn = ttk.Button(btn_frame, text="💾 Save Context",
-                           command=self.save_current_context, compound='left')
-        save_btn.pack(side="left", padx=2)
-        ToolTip(save_btn, "Save current files and notes as a named context")
+        self.save_btn = ttk.Button(btn_frame, text="💾 Save Snapshot",
+                        command=self.save_current_context, compound='left')
+        self.save_btn.pack(side="left", padx=2)
+        ToolTip(self.save_btn, "Save current files and notes as a named snapshot")
         
         export_btn = ttk.Button(btn_frame, text="📤 Export",
-                             command=self.export_context, compound='left')
+                            command=self.export_context, compound='left')
         export_btn.pack(side="left", padx=2)
-        ToolTip(export_btn, "Export context to a JSON or Markdown file")
+        ToolTip(export_btn, "Export snapshot to a JSON or Markdown file")
         
         import_btn = ttk.Button(btn_frame, text="📥 Import",
-                             command=self.import_context, compound='left')
+                            command=self.import_context, compound='left')
         import_btn.pack(side="left", padx=2)
-        ToolTip(import_btn, "Import context from a JSON file")
+        ToolTip(import_btn, "Import snapshot from a JSON file")
         
         # Context selector
         select_frame = ttk.Frame(self.context_frame)
         select_frame.pack(fill="x", padx=5, pady=5)
         
-        ttk.Label(select_frame, text="Load Context:").pack(side="left")
+        ttk.Label(select_frame, text="Load Snapshot:").pack(side="left")
         self.context_combo = ttk.Combobox(select_frame, state="readonly")
         self.context_combo.pack(side="left", fill="x", expand=True, padx=5)
         self.context_combo.bind("<<ComboboxSelected>>", self.load_context)
-        ToolTip(self.context_combo, "Select a saved context to load")
+        ToolTip(self.context_combo, "Select a saved snapshot to load")
+        
+        # Track context state
+        self._context_state_synced = True
+
+    def _setup_context_change_tracking(self):
+        """Set up tracking for changes to the context state."""
+        # Setup tracking for changes in files or notes
+        if hasattr(self, 'listbox_files'):
+            self.listbox_files.bind('<<ListboxSelect>>', self._track_context_changes)
+        
+        if hasattr(self, 'notes_text'):
+            self.notes_text.bind('<KeyRelease>', self._track_context_changes)
+
+    def _reset_status_bar_color(self):
+        """Reset the status bar color after a visual feedback."""
+        self.status_bar.config(background=self.style.lookup("StatusBar.TFrame", "background"))
 
     def _create_quick_notes(self):
         """Create a quick notes panel for temporary thoughts."""
-        notes_frame = ttk.LabelFrame(self.frame_main, text="✏️ Quick Notes")
+        notes_frame = ttk.LabelFrame(self.frame_main, text="✏️ Notes & LLM Prompts")
         notes_frame.pack(fill="x", padx=10, pady=5)
         
         self.notes_text = scrolledtext.ScrolledText(notes_frame, height=3,
                                                   font=Font(family="Segoe UI", size=10))
         self.notes_text.pack(fill="x", padx=5, pady=5)
+        
+        # Add placeholder text
+        if not hasattr(self, 'notes_placeholder_shown') or not self.notes_placeholder_shown:
+            self.notes_text.insert("1.0", "Add notes about these files or instructions for an LLM...")
+            self.notes_text.config(foreground="gray")
+            self.notes_placeholder_shown = True
+            
+            # Bind events to clear placeholder
+            self.notes_text.bind("<FocusIn>", self._clear_notes_placeholder)
+            self.notes_text.bind("<FocusOut>", self._restore_notes_placeholder)
+
+    def _clear_notes_placeholder(self, event=None):
+        """Clear the placeholder text when the notes field gets focus."""
+        if self.notes_placeholder_shown:
+            self.notes_text.delete("1.0", "end")
+            self.notes_text.config(foreground="black")
+            self.notes_placeholder_shown = False
+
+    def _restore_notes_placeholder(self, event=None):
+        """Restore the placeholder text if the notes field is empty."""
+        if not self.notes_text.get("1.0", "end-1c"):
+            self.notes_text.insert("1.0", "Add notes about these files or instructions for an LLM...")
+            self.notes_text.config(foreground="gray")
+            self.notes_placeholder_shown = True
+
+    def _track_context_changes(self, event=None):
+        """Track changes in the context (files or notes) to show save indicator."""
+        # If we already know it's not synced, don't recalculate
+        if not self._context_state_synced:
+            return
+        
+        # Check if current context is loaded
+        current_context = self.context_manager.get_current_context()
+        if not current_context:
+            return  # Nothing to compare against
+        
+        # Compare files
+        current_files = list(self.listbox_files.get(0, "end"))
+        saved_files = current_context.get('files', [])
+        
+        files_match = (len(current_files) == len(saved_files) and 
+                      all(a == b for a, b in zip(current_files, saved_files)))
+        
+        # Compare notes (ignore placeholder text)
+        current_notes = self.notes_text.get("1.0", "end-1c")
+        if self.notes_placeholder_shown:
+            current_notes = ""
+        saved_notes = current_context.get('notes', '').strip()
+        
+        # Update state and visual indicator
+        if not files_match or current_notes.strip() != saved_notes:
+            self._context_state_synced = False
+            self._update_save_context_button_style(is_synced=False)
+
+    def _update_save_context_button_style(self, is_synced=True):
+        """Update the save context button style to indicate changes."""
+        if is_synced:
+            self.save_btn.configure(text="💾 Save Snapshot")
+        else:
+            self.save_btn.configure(text="💾 Save Snapshot*")
+            
+        # Could also change button style, color, etc. for more visual impact
+        # self.save_btn.configure(style="Attention.TButton" if not is_synced else "TButton")
 
     def _create_file_list(self):
         """Create the selected files list panel with reordering and token count."""
@@ -492,13 +592,6 @@ class FileConcatenatorApp(TkinterDnD.Tk):
         btn_exit.pack(side="left", padx=5)
         ToolTip(btn_exit, "Exit the application")
 
-    def _create_log_panel(self):
-        """Create the log panel."""
-        frame_log = ttk.LabelFrame(self.frame_main, text="Log")
-        frame_log.pack(fill="both", expand=True, padx=10, pady=10)
-        self.log_text = scrolledtext.ScrolledText(frame_log, wrap="word", height=10)
-        self.log_text.pack(fill="both", expand=True, padx=10, pady=10)
-
     def _create_status_bar(self):
         """Create the application status bar."""
         self.status_bar = ttk.Frame(self, style="StatusBar.TFrame")
@@ -524,17 +617,6 @@ class FileConcatenatorApp(TkinterDnD.Tk):
                                     command=self.toggle_focus_mode)
         focus_check.pack()
         ToolTip(focus_check, "Hide the file explorer for focused work")
-
-    def log(self, message):
-        """
-        Add a timestamped message to the log panel.
-        
-        Args:
-            message (str): The message to log
-        """
-        timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S] ")
-        self.log_text.insert("end", timestamp + message + "\n")
-        self.log_text.see("end")
 
     def add_files(self):
         """Open a file dialog to add one or more files to the list."""
@@ -809,7 +891,7 @@ class FileConcatenatorApp(TkinterDnD.Tk):
     def show_context_help(self):
         """Show help dialog explaining contexts."""
         help_text = self.context_manager.help_text()
-        messagebox.showinfo("About Working Contexts", help_text.strip())
+        messagebox.showinfo("About Task Snapshots", help_text.strip())
 
     def export_context(self):
         """Export the current context to a file."""
@@ -827,16 +909,50 @@ class FileConcatenatorApp(TkinterDnD.Tk):
     def save_current_context(self):
         """Save the current workspace as a named context."""
         name = self.context_name.get().strip()
-        if not name:
-            self.status_label.config(text="Please enter a name for the context")
-            return
-            
-        files = list(self.listbox_files.get(0, END))
-        notes = self.notes_text.get("1.0", END)
         
+        # Auto-suggest name if empty
+        if not name:
+            # Generate a name based on files if any are selected
+            files = list(self.listbox_files.get(0, END))
+            if files:
+                # Use first file's basename without extension as part of the suggested name
+                first_file = os.path.basename(files[0])
+                base_name = os.path.splitext(first_file)[0]
+                suggested_name = f"{base_name}-snapshot-{datetime.now().strftime('%m%d')}"
+            else:
+                # Generic name if no files are selected
+                suggested_name = f"snapshot-{datetime.now().strftime('%Y%m%d-%H%M')}"
+            
+            # Set the suggested name
+            self.context_name.delete(0, END)
+            self.context_name.insert(0, suggested_name)
+            name = suggested_name
+            self.log(f"Suggested name: {name}")
+        
+        # Check if name is set (should always be true now with auto-suggest)
+        if not name:
+            self.status_label.config(text="Please enter a name for the snapshot")
+            return False
+        
+        # Get files and notes
+        files = list(self.listbox_files.get(0, END))
+        
+        # Get notes, handling placeholder text
+        notes = self.notes_text.get("1.0", END)
+        if self.notes_placeholder_shown:
+            notes = ""
+        
+        # Save the context
         if self.context_manager.save_context(name, files, notes):
             self.update_context_combo()
-            self.status_label.config(text=f"Context '{name}' saved")
+            self.status_label.config(text=f"Snapshot '{name}' saved")
+            
+            # Update sync state
+            self._context_state_synced = True
+            self._update_save_context_button_style(is_synced=True)
+            return True
+        
+        return False
 
     def update_context_combo(self):
         """Update the context combo box with saved contexts."""
@@ -866,7 +982,11 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             
         # Clear current state
         self.listbox_files.delete(0, END)
+        
+        # Clear notes and remove placeholder
         self.notes_text.delete("1.0", END)
+        self.notes_placeholder_shown = False
+        self.notes_text.config(foreground="black")
         
         # Load context state
         for file in context['files']:
@@ -877,13 +997,25 @@ class FileConcatenatorApp(TkinterDnD.Tk):
             # Expand folders to show each selected file
             self.file_tree_manager.expand_to_path(file)
         
-        self.notes_text.insert("1.0", context.get('notes', ''))
+        # Add notes back if there are any
+        if context.get('notes', '').strip():
+            self.notes_text.insert("1.0", context.get('notes', ''))
+        else:
+            # If no notes, show the placeholder
+            self._restore_notes_placeholder()
         
         # Update UI
         self.context_name.delete(0, END)
         self.context_name.insert(0, name)
         
-        self.status_label.config(text=f"Context '{name}' loaded with {len(context['files'])} files")
+        # Update sync state
+        self._context_state_synced = True
+        self._update_save_context_button_style(is_synced=True)
+        
+        self.status_label.config(text=f"Snapshot '{name}' loaded with {len(context['files'])} files")
+        
+        # Update token count based on loaded files
+        self.update_token_count()
 
     def toggle_focus_mode(self):
         """Toggle focus mode to reduce visual distractions."""
@@ -944,9 +1076,14 @@ class FileConcatenatorApp(TkinterDnD.Tk):
     def _restore_notes_and_editor(self, quick_notes, editor_file):
         """Restore quick notes and editor file."""
         # Restore notes
-        if quick_notes:
+        if quick_notes and quick_notes.strip():
             self.notes_text.delete("1.0", tk.END)
             self.notes_text.insert("1.0", quick_notes)
+            self.notes_text.config(foreground="black")
+            self.notes_placeholder_shown = False
+        else:
+            # Make sure placeholder is shown
+            self._restore_notes_placeholder()
             
         # Restore editor file
         if editor_file and os.path.exists(editor_file):
